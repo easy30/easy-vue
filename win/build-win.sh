@@ -11,15 +11,18 @@
 #   ZIG=/path/to/zig-0.13.0/zig ./build-win.sh [x64|arm64|all]
 #   # 默认 all;ZIG 缺省自动探测 PATH 与 /tmp
 # 产物:
-#   ../easy-front-win-x64.exe   ../easy-front-win-arm64.exe
+#   bin/easy-front-win-x64.exe   bin/easy-front-win-arm64.exe
+#   （中间 .c 随 exe 一并落在 bin/，不入根路径）
 # =============================================================================
 set -euo pipefail
 
 # 定位本项目根
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUT="$ROOT/bin"
 SHIM="$HERE/win32_posix_shim.h"
 WRAP="$HERE/zigcc-win-wrapper.sh"
+mkdir -p "$OUT"
 
 # 真实 zig 路径
 ZIG="${ZIG:-}"
@@ -48,8 +51,8 @@ build () {
       node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o "$out" )
   file "$out"
 }
-if [ "$TARGET" = all ] || [ "$TARGET" = x64 ];   then build x86_64-windows-gnu   "$ROOT/easy-front-win-x64.exe";   fi
-if [ "$TARGET" = all ] || [ "$TARGET" = arm64 ]; then build aarch64-windows-gnu  "$ROOT/easy-front-win-arm64.exe"; fi
+if [ "$TARGET" = all ] || [ "$TARGET" = x64 ];   then build x86_64-windows-gnu   "$OUT/easy-front-win-x64.exe";   fi
+if [ "$TARGET" = all ] || [ "$TARGET" = arm64 ]; then build aarch64-windows-gnu  "$OUT/easy-front-win-arm64.exe"; fi
 
 rm -f "$WRAP_TMP"; rm -rf "$wrapdir"
-echo "完成 ✓  产物见 $ROOT/easy-front-win-{x64,arm64}.exe"
+echo "完成 ✓  产物见 $OUT/easy-front-win-{x64,arm64}.exe"

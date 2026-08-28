@@ -16,21 +16,12 @@ npm-debug.log*
 !.git/
 
 # --- 构建产物（可再生成） ---
+# 所有可执行文件/中间 C/调试符号统一输出到 bin/
+bin/
 .scriptc/
 *.exe
 *.dll
 *.pdb
-easy-front-bin
-easy-front-linux
-easy-front-linux-arm64
-easy-front-mac-arm64
-easy-front-mac-intel
-easy-front-win-*
-esbuild-cli-bin
-stub-bin
-serve.c
-stub.c
-esbuild_cli.c
 
 # --- 系统/编辑器 ---
 .DS_Store

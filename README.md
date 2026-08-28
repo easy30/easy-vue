@@ -11,10 +11,7 @@
 ```
 easy-front/
 ├── src/serve.ts            # 程序入口（stdin/stdout JSON 常驻协议）
-├── easy-front-bin         # 编译产物 · macOS (x86_64)
-├── easy-front-linux      # 编译产物 · Linux (x86_64-musl 纯静态)
-├── easy-front-win-x64.exe  # 编译产物 · Windows (x86_64)
-├── easy-front-win-arm64.exe# 编译产物 · Windows (arm64)
+├── bin/                  # 全部编译产物集中于此（exe / 中间 .c / pdb，均可再生成）
 ├── win/                  # Windows 交叉编译 shim + wrapper + 一键脚本
 ├── node_modules/         # 依赖：@vue/compiler-sfc、esbuild、scriptc@0.0.33
 ├── api-demo.ts          # 测试样例（含 @api 装饰器）
@@ -49,14 +46,14 @@ easy-front convert           # 一次性 stdin→stdout
 
 ### macOS（本机原生，架构随本机）
 ```bash
-node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o easy-front-bin
+node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-front-bin
 ```
 
 ### 各平台 × 64 位架构（32 位不编）
 
-本机为 macOS x86_64，其它平台/架构用 zig 交叉编译（`zig cc` 当后端）。已产出的 7 个 64 位产物：
+本机为 macOS x86_64，其它平台/架构用 zig 交叉编译（`zig cc` 当后端）。**全部产物统一输出到 `bin/`**。已产出的 7 个 64 位产物：
 
-| 产物 | 平台 × 架构 | 大小 | 命令（`SCRIPTC_CC=zigcc` + `SCRIPTC_TARGET`） |
+| 产物（均在 `bin/`） | 平台 × 架构 | 大小 | 命令（`SCRIPTC_CC=zigcc` + `SCRIPTC_TARGET`） |
 |---|---|---|---|
 | `easy-front-bin` | macOS x86_64（本机原生）| ~2.0 MB | 本机 `--backend c` 直编 |
 | `easy-front-mac-arm64` | macOS arm64（Apple Silicon）| ~2.0 MB | `aarch64-macos` |
@@ -69,18 +66,18 @@ node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o easy-front
 ```bash
 # 交叉编译示例（macOS/Apple Silicon/Linux 均可一台机器出多目标）
 export PATH=/tmp/zig-macos-x86_64-0.13.0:$PATH
-SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-macos      node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o easy-front-mac-arm64
-SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-macos      node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o easy-front-mac-intel
-SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-linux-musl node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o easy-front-linux
-SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-musl node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o easy-front-linux-arm64
+SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-macos      node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-front-mac-arm64
+SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-macos      node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-front-mac-intel
+SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-linux-musl node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-front-linux
+SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-musl node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-front-linux-arm64
 ```
 
-> **Windows（x86_64 / arm64）**：zig 0.13 自带的 mingw-w64 缺 POSIX 符号（`struct timespec` / `clock_gettime` / `nanosleep`，它们属 winpthread，非 msvcrt），直接 `zig cc` 交叉到 `-windows-gnu` 会失败。**已用一个小 hack 打通**：提供一个 `win/win32_posix_shim.h` 自足补齐这些符号（仅依赖 `windows.h` 的 `GetTickCount64`/`GetSystemTimeAsFileTime`/`Sleep`），再用 `win/zigcc-win-wrapper.sh`（PATH 劫持 `zig`）在 `zig cc` 命令上强制 `-include` 注入，即可在 macOS/Linux 一台机器上交叉出两个 Windows 64 位产物。一键脚本：
+> **Windows（x86_64 / arm64）**：zig 0.13 自带的 mingw-w64 缺 POSIX 符号（`struct timespec` / `clock_gettime` / `nanosleep`，它们属 winpthread，非 msvcrt），直接 `zig cc` 交叉到 `-windows-gnu` 会失败。**已用一个小 hack 打通**：提供一个 `win/win32_posix_shim.h` 自足补齐这些符号（仅依赖 `windows.h` 的 `GetTickCount64`/`GetSystemTimeAsFileTime`/`Sleep`），再用 `win/zigcc-win-wrapper.sh`（PATH 劫持 `zig`）在 `zig cc` 命令上强制 `-include` 注入，即可在 macOS/Linux 一台机器上交叉出两个 Windows 64 位产物。一键脚本（中间 `.c` 一并落在 `bin/`）：
 
 ```bash
 # 一键构建（ZIG 缺省自动探测；也可 ZIG=/path/to/zig ./win/build-win.sh）
-./win/build-win.sh x64     # 出 easy-front-win-x64.exe
-./win/build-win.sh arm64   # 出 easy-front-win-arm64.exe
+./win/build-win.sh x64     # 出 bin/easy-front-win-x64.exe
+./win/build-win.sh arm64   # 出 bin/easy-front-win-arm64.exe
 ./win/build-win.sh all     # 两个都出
 ```
 
@@ -127,16 +124,16 @@ export ESBUILD_BINARY_PATH=/absolute/path/to/esbuild   # 启动前设置
 ### 一次性 convert 例子
 
 ```bash
-echo '{"type":"vue","source":"<template><div>{{n}}</div></template>\\n<script setup>\\nconst n=ref(1)\\n</script>","filename":"views/hello.vue"}' | ./easy-front-bin convert
+echo '{"type":"vue","source":"<template><div>{{n}}</div></template>\\n<script setup>\\nconst n=ref(1)\\n</script>","filename":"views/hello.vue"}' | ./bin/easy-front-bin convert
 # → {"id":null,"ok":true,"js":"...","css":""}
 ```
 
-错误（文件不存在）：`echo '{"filename":"/no/such.vue"}' | ./easy-front-bin convert` → `{"ok":false,"error":"file not found: /no/such.vue"}`
+错误（文件不存在）：`echo '{"filename":"/no/such.vue"}' | ./bin/easy-front-bin convert` → `{"ok":false,"error":"file not found: /no/such.vue"}`
 
 ### HTTP 常驻调用（推荐，多后端/多次复用）
 
 ```bash
-./easy-front-bin serve &            # 127.0.0.1:9000
+./bin/easy-front-bin serve &            # 127.0.0.1:9000
 curl -s -XPOST 127.0.0.1:9000/compile \
   -d '{"type":"ts","source":"const n: number=1; export default n;"}'
 # → {"id":null,"ok":true,"js":"const n = 1;\\n..."}
