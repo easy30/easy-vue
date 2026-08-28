@@ -51,11 +51,10 @@ node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-v
 
 ### 各平台 × 64 位架构（32 位不编）
 
-本机为 macOS x86_64，其它平台/架构用 zig 交叉编译（`zig cc` 当后端）。**全部产物统一输出到 `bin/`**。已产出的 7 个 64 位产物：
+本机为 macOS x86_64，其它平台/架构用 zig 交叉编译（`zig cc` 当后端）。**全部产物统一输出到 `bin/`**。已产出的 6 个 64 位交叉编译产物（另有本机原生 `easy-vue-bin`，见上文「macOS 本机原生」）：
 
 | 产物（均在 `bin/`） | 平台 × 架构 | 大小 | 命令（`SCRIPTC_CC=zigcc` + `SCRIPTC_TARGET`） |
 |---|---|---|---|
-| `easy-vue-bin` | macOS x86_64（本机原生）| ~2.0 MB | 本机 `--backend c` 直编 |
 | `easy-vue-mac-arm64` | macOS arm64（Apple Silicon）| ~2.0 MB | `aarch64-macos` |
 | `easy-vue-mac-intel` | macOS x86_64（Intel）| ~2.0 MB | `x86_64-macos` |
 | `easy-vue-linux` | Linux x86_64 | ~4.9 MB | `x86_64-linux-musl`（纯静态）|

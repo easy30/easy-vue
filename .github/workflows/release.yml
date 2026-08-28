@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14   # Intel macOS runner：本机原生编 x86_64，并用 zig 交叉出全平台
+    runs-on: macos-14   # macOS runner：用 zig 一次交叉编译出全部平台产物
     steps:
       - uses: actions/checkout@v4
 
@@ -52,11 +52,9 @@ jobs:
       - name: Prepare dist
         run: mkdir -p dist
 
-      # --- macOS（本机原生 = macOS x86_64，Intel runner） ---
-      - name: Build macOS native (x86_64)
-        run: node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o dist/easy-vue-bin
-
-      # --- 交叉编译其余平台（全平台集中在 macOS 一台机器出目标） ---
+      # --- 交叉编译各平台（全平台集中在 macOS 一台机器出目标） ---
+      # 注：不再产「本机原生」easy-vue-bin —— 它与下方 zig 交叉的 x86_64-macos
+      # (easy-vue-mac-intel) 同属 macOS x86_64，冗余。
       - name: Build macOS arm64
         run: SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-macos node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o dist/easy-vue-mac-arm64
 
@@ -85,7 +83,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/easy-vue-bin
             dist/easy-vue-mac-arm64
             dist/easy-vue-mac-intel
             dist/easy-vue-linux
