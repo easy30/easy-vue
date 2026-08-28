@@ -1,4 +1,4 @@
-// easy-front 模式1 · 无状态前端编译器（scriptc 原生二进制）
+// easy-vue 模式1 · 无状态前端编译器（scriptc 原生二进制）
 // 协议：stdin 每行一个 JSON 请求，stdout 每行一个 JSON 响应
 //   入 {"id", "type":"vue"|"ts"|"js", "source"?|"filename"?, "sourcemap"?:boolean}
 //   出 {"id","ok","js"?,"css"?,"error"?}
@@ -41,11 +41,11 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
 
   // script / script setup：产物放最前（第 0 行起），map 零偏移内联
   if (d.scriptSetup) {
-    const s = compileScript(d, { id: 'ef' });
+    const s = compileScript(d, { id: 'ev' });
     js += s.content + '\n';
     if (wantMap && s.map) scriptMap = s.map;
   } else if (d.script) {
-    const s = compileScript(d, { id: 'ef' });
+    const s = compileScript(d, { id: 'ev' });
     js += s.content + '\n';
     if (wantMap && s.map) scriptMap = s.map;
   } else {
@@ -54,14 +54,14 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
 
   // 非 sourcemap 模式加头部注释；sourcemap 模式不加（保证 script 从第 0 行起，map 无需平移）
   if (!wantMap) {
-    js = '// compiled by @vue/compiler-sfc via easy-front\n' + js;
+    js = '// compiled by @vue/compiler-sfc via easy-vue\n' + js;
   }
 
   let css = '';
   if (d.styles && d.styles.length > 0) {
     const styleParts: string[] = [];
     d.styles.forEach((st, i) => {
-      const r = compileStyle({ source: st.content, filename, id: 'ef-' + i, scoped: !!st.scoped });
+      const r = compileStyle({ source: st.content, filename, id: 'ev-' + i, scoped: !!st.scoped });
       if (r.errors && r.errors.length > 0) {
         throw new Error('style errors: ' + JSON.stringify(r.errors));
       }
@@ -71,7 +71,7 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
   }
 
   if (d.template) {
-    const r = compileTemplate({ source: d.template.content, filename, id: 'ef' });
+    const r = compileTemplate({ source: d.template.content, filename, id: 'ev' });
     if (r.errors && r.errors.length > 0) {
       throw new Error('template errors: ' + JSON.stringify(r.errors));
     }
@@ -190,7 +190,7 @@ function convert() {
 }
 
 function usage() {
-  process.stdout.write('usage: easy-front serve [host:]port | convert\n' +
+  process.stdout.write('usage: easy-vue serve [host:]port | convert\n' +
     '  serve   HTTP 常驻（必须指定端口，如 0.0.0.0:9000；或设 SF_HOST/SF_PORT），POST /compile\n' +
     '  convert stdin 读一行 JSON 编译后写一行输出即退出\n');
 }

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# easy-front · 在 macOS/Linux 上交叉编译出 Windows (x64/arm64) 产物
+# easy-vue · 在 macOS/Linux 上交叉编译出 Windows (x64/arm64) 产物
 #
 # 背景：zig 0.13 自带的 mingw-w64 缺 POSIX 符号(struct timespec/clock_gettime/
 #       nanosleep),scriptc 交叉到 -windows-gnu 直接编译失败。本脚本用一个
@@ -11,7 +11,7 @@
 #   ZIG=/path/to/zig-0.13.0/zig ./build-win.sh [x64|arm64|all]
 #   # 默认 all;ZIG 缺省自动探测 PATH 与 /tmp
 # 产物:
-#   bin/easy-front-win-x64.exe   bin/easy-front-win-arm64.exe
+#   bin/easy-vue-win-x64.exe   bin/easy-vue-win-arm64.exe
 #   （中间 .c 随 exe 一并落在 bin/，不入根路径）
 # =============================================================================
 set -euo pipefail
@@ -51,8 +51,8 @@ build () {
       node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o "$out" )
   file "$out"
 }
-if [ "$TARGET" = all ] || [ "$TARGET" = x64 ];   then build x86_64-windows-gnu   "$OUT/easy-front-win-x64.exe";   fi
-if [ "$TARGET" = all ] || [ "$TARGET" = arm64 ]; then build aarch64-windows-gnu  "$OUT/easy-front-win-arm64.exe"; fi
+if [ "$TARGET" = all ] || [ "$TARGET" = x64 ];   then build x86_64-windows-gnu   "$OUT/easy-vue-win-x64.exe";   fi
+if [ "$TARGET" = all ] || [ "$TARGET" = arm64 ]; then build aarch64-windows-gnu  "$OUT/easy-vue-win-arm64.exe"; fi
 
 rm -f "$WRAP_TMP"; rm -rf "$wrapdir"
-echo "完成 ✓  产物见 $OUT/easy-front-win-{x64,arm64}.exe"
+echo "完成 ✓  产物见 $OUT/easy-vue-win-{x64,arm64}.exe"

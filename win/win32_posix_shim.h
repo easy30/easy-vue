@@ -1,4 +1,4 @@
-/*  ----------  easy-front: mingw-w64 POSIX shim (zig 交叉编译用)  ----------
+/*  ----------  easy-vue: mingw-w64 POSIX shim (zig 交叉编译用)  ----------
  * zig 0.13 自带的 mingw-w64 缺 struct timespec / nanosleep / clock_gettime
  * （这些属 winpthread，zig 的 CRT 不含）。此头在交叉编译到 -windows-gnu
  * 目标时被强制 -include，自足补齐，不改 scriptc 公共包源码。
@@ -6,8 +6,8 @@
  * Windows API 类型/函数一律来自 <windows.h>（WIN32_LEAN_AND_MEAN 减载），
  * 本头只补 POSIX 计时层，避免与 windows.h 重定义冲突。
  */
-#ifndef EASYFRONT_WIN32_POSIX_SHIM_H
-#define EASYFRONT_WIN32_POSIX_SHIM_H
+#ifndef EASYVUE_WIN32_POSIX_SHIM_H
+#define EASYVUE_WIN32_POSIX_SHIM_H
 
 #ifdef _WIN32
 
@@ -63,4 +63,4 @@ static __inline int nanosleep(const struct timespec *req, struct timespec *rem) 
 #endif
 
 #endif /* _WIN32 */
-#endif /* EASYFRONT_WIN32_POSIX_SHIM_H */
+#endif /* EASYVUE_WIN32_POSIX_SHIM_H */

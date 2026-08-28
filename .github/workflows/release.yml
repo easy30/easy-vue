@@ -1,0 +1,87 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'          # 打 v1.0.0 这类 tag 时自动发版
+  workflow_dispatch:  # 也允许在 Actions 界面手动触发
+
+permissions:
+  contents: write       # 上传 Release 资产所需
+
+jobs:
+  build:
+    runs-on: macos-14   # Intel macOS runner：本机原生编 x86_64，并用 zig 交叉出全平台
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Zig 0.13.0
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
+
+      # scriptc 用 SCRIPTC_CC=zigcc 调 zig。zigcc 必须是“调用 PATH 里的 zig”
+      # 的 wrapper 脚本（等价 zig 自带的 zigcc），不能是 zig 二进制的软链：
+      # win/build-win.sh 会劫持 PATH 里的 zig 来注入 POSIX shim，只有经
+      # wrapper 重新按 PATH 解析 zig 才会命中该劫持。
+      - name: Ensure zigcc alias
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          if ! command -v zigcc >/dev/null 2>&1; then
+            printf '#!/bin/sh\nexec zig cc "$@"\n' > "$HOME/.local/bin/zigcc"
+            chmod +x "$HOME/.local/bin/zigcc"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          zigcc --version
+
+      - name: Prepare dist
+        run: mkdir -p dist
+
+      # --- macOS（本机原生 = macOS x86_64，Intel runner） ---
+      - name: Build macOS native (x86_64)
+        run: node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o dist/easy-vue-bin
+
+      # --- 交叉编译其余平台（全平台集中在 macOS 一台机器出目标） ---
+      - name: Build macOS arm64
+        run: SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-macos node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o dist/easy-vue-mac-arm64
+
+      - name: Build macOS intel (cross)
+        run: SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-macos node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o dist/easy-vue-mac-intel
+
+      - name: Build Linux x86_64
+        run: SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-linux-musl node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o dist/easy-vue-linux
+
+      - name: Build Linux arm64
+        run: SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-musl node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o dist/easy-vue-linux-arm64
+
+      # --- Windows（走 win/build-win.sh，内嵌 zigcc wrapper + POSIX shim） ---
+      - name: Build Windows (x64 + arm64)
+        run: ./win/build-win.sh all
+
+      - name: Collect Windows artifacts
+        run: mv bin/easy-vue-win-*.exe dist/
+
+      - name: List artifacts
+        run: ls -lh dist/
+
+      # --- 打 tag 时自动创建 Release 并附加全部产物 ---
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
