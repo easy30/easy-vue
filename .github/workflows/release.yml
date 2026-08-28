@@ -80,8 +80,16 @@ jobs:
         run: ls -lh dist/
 
       # --- 打 tag 时自动创建 Release 并附加全部产物 ---
+      # 显式列出发布产物（不开 glob，避免把 scriptc 的中间 .c 也传上去）
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/easy-vue-bin
+            dist/easy-vue-mac-arm64
+            dist/easy-vue-mac-intel
+            dist/easy-vue-linux
+            dist/easy-vue-linux-arm64
+            dist/easy-vue-win-x64.exe
+            dist/easy-vue-win-arm64.exe
           generate_release_notes: true
