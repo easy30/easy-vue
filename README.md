@@ -155,13 +155,72 @@ HTTP 模式天然支持并发、可设连接/读超时、可中断 —— 调用
 easy-vue4j 通过 `VueCompiler` 接口对接本工具（**HTTP 模式**）：
 - `EasyVueHttpClient`（HTTP `POST /compile`，走 `serve` 常驻；可并发、可设超时、无僵死）
 
+参考实现已在本仓库 [easy-vue4j/src/main/java/com/easyvue/EasyVueHttpClient.java](easy-vue4j/src/main/java/com/easyvue/EasyVueHttpClient.java)：
+- **客户端自定端口**：启动前自挑空闲端口传给 easy-vue，天然知端口，无需读 stdout/注册文件。
+- **指定进程数**：`EasyVueHttpClient.start(bin, N)` 自动起 N 个 serve 进程（N 核并行），内部轮询分发。
+- **就绪探测**：启动后逐端口轮询 connect，服务真正就绪才返回。
+
 ```java
-EasyVueHttpClient ef = new EasyVueHttpClient("http://127.0.0.1:9000", 5000, 30000);
+// 单进程（等价连固定端口）
+EasyVueHttpClient ef = new // ... 或
+EasyVueHttpClient ef = EasyVueHttpClient.start("/path/to/easy-vue-bin", 1);
+
+// 多进程水平扩展：N 个进程 = N 核并行
+EasyVueHttpClient ef = EasyVueHttpClient.start("/path/to/easy-vue-bin", 4);
 vueCache.setCompiler(new EasyVueCompiler(ef));
 ```
 
 ---
 
-## 六、易失提醒
+## 六、水平扩展（多进程）
+
+单进程 `serve` 已可并发（单请求 vue 编译 ~2.7ms）。若单进程并发不够，需水平扩展到多进程 —— **由客户端自行启动多个 `serve` 端口进程**，easy-vue 本身无需改动（无状态，可随意多开）。
+
+### 为什么不在 easy-vue 内部做 worker 池/网关
+- easy-vue 是 scriptc 原生二进制，其 `child_process` 仅支持同步 `spawnSync`/`execFileSync`，**没有可靠的异步 spawn / 事件 IPC**，因此无法在单二进制内自托管多个常驻子进程做网关。
+- 最简、最稳的水平扩展 = 客户端起多个 `serve` 进程 + 自己调度。
+
+### 客户端如何知道端口（推荐：客户端自己定端口，零读取）
+
+最优雅的方式是**客户端在启动前自己挑一个空闲端口传给 easy-vue**，这样端口天然已知，无需读 stdout、无需额外线程。
+
+**Java（非阻塞，零线程）**
+```java
+// 1. 自挑一个空闲端口（内网工具可接受极小竞争窗口）
+int port;
+try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
+    port = s.getLocalPort();
+}
+// 2. 非阻塞启动 easy-vue，端口已知，输出直接丢弃
+ProcessBuilder pb = new ProcessBuilder("./easy-vue", "serve", "127.0.0.1:" + port);
+pb.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+Process p = pb.start();            // 非阻塞返回，easy-vue 在子进程常驻
+// 3. 直接连 127.0.0.1:port，走现有 EasyVueHttpClient
+```
+
+**Python（非阻塞）**
+```python
+import socket, subprocess
+
+# 1. 自挑一个空闲端口
+s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+
+# 2. 非阻塞启动，输出丢弃
+proc = subprocess.Popen(
+    ["./easy-vue", "serve", f"127.0.0.1:{port}"],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+)
+# 3. 直接连 127.0.0.1:port
+```
+
+**要点**
+- 客户端知端口 ⇒ 不用读 stdout/注册文件，不碰管道缓冲与死锁问题，无需额外线程。
+- 多开 N 个 `serve` 即 N 核并行（编译是 CPU 密集，N 建议 ≈ CPU 核数）。
+- 客户端自己对多个端口做轮询/分发即可（例：easy-vue4j 可扩展为 N 个 `EasyVueHttpClient` 轮询）。
+
+---
+
+## 七、易失提醒
 - 本目录如置于 `/tmp` 下重启会丢失；请移到持久目录。
 - scriptc 需固定 **0.0.33**（见上文），避免 0.0.34 的 sourcemap 回归。
