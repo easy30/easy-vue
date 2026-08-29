@@ -192,6 +192,14 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
         code = code.replace(/(const __returned__ = \{)/, `const __returned___mods = { ${extra} }\n$1`);
         code = code.replace(/(Object\.defineProperty\(__returned__)/, 'Object.assign(__returned__, __returned___mods)\n$1');
       }
+
+      // 把 css module 变量名（$style / 具名模块）登记为 setup 绑定。
+      // 这样模板里的 $style.X / m1.X 会被编译成 $setup["$style"].X（走 setup 返回的绑定），
+      // 而不是 _ctx.$style（Vue 3 公开实例 Proxy 会屏蔽 $ 前缀的 setup 读，_ctx.$style 为 undefined）。
+      for (const name of moduleVarNames) {
+        sfcBindings = sfcBindings || {};
+        sfcBindings[name] = 'setup-const';
+      }
     }
 
     const scriptEl: any = d.scriptSetup || d.script;
