@@ -1,6 +1,6 @@
-# easy-vue 构建指南(BUILD.md)
+# easy-vue macOS 本机构建指南(mac-local-build.md)
 
-本文件记录 `bin/easy-vue-bin` / `bin/easy-vue-mac-intel` 等原生二进制是怎么构建出来的、用到哪些组件、以及如何让下次编译更快。
+本文件记录 `bin/easy-vue-bin` / `bin/easy-vue-mac-intel` 等 macOS 原生二进制是怎么构建出来的、用到哪些组件、以及如何让下次编译更快。
 
 > 这些 `bin/` 产物已被 `.gitignore` 忽略,不进入版本库;改完 `src/*.ts` 后需按本文重新构建分发。
 
