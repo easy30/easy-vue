@@ -165,8 +165,10 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
   // 2. script / script setup
   let js = '';
   let scriptMap: any = null;
+  let sfcBindings: any = null;
   if (d.scriptSetup || d.script) {
     const s = compileScript(d, { id: 'ev' });
+    if (s.bindings) sfcBindings = s.bindings;
     // 把 default 导出捕获为局部变量 __sfc__，随后把模板 render 挂到它上面再导出
     let code = s.content.replace(/export default/, 'const __sfc__ =');
     if (wantMap && s.map) scriptMap = s.map;
@@ -206,9 +208,15 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
     js = '// compiled by @vue/compiler-sfc via easy-vue\n' + js;
   }
 
-  // 4. template（cssModules 使模板 $style.X / m1.X 被解析成 _ctx 引用），并挂到组件对象上
+  // 4. template（cssModules 使模板 $style.X / m1.X 被解析成 _ctx 引用），并挂到组件对象上。
+  //    绑定 metadata（script setup 的导入/局部绑定）传下去，模板里的 <Foo/> 才能直接引用
+  //    $setup["Foo"]，而不是退化为 _resolveComponent("Foo")（运行时依赖全局组件注册，会白屏）。
+  const templateOptions: any = { source: d.template.content, filename, id: 'ev', cssModules };
+  if (sfcBindings) {
+    templateOptions.compilerOptions = { bindingMetadata: sfcBindings as any };
+  }
   if (d.template) {
-    const r = compileTemplate({ source: d.template.content, filename, id: 'ev', cssModules } as any);
+    const r = compileTemplate(templateOptions);
     if (r.errors && r.errors.length > 0) {
       throw new Error('template errors: ' + JSON.stringify(r.errors));
     }
