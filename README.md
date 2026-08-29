@@ -43,6 +43,7 @@ easy-vue convert           # 一次性 stdin→stdout
 - **Node ≥ 20**（仅编译期需要；产物运行不需要 Node）
 - **scriptc 0.0.33**（本项目已固定到 `node_modules/.bin/scriptc`；⚠️ 勿用 `npx scriptc` 免安装——会拉 0.0.34 有回归）
 - **Zig 0.13.0**（本机原生 macOS 不需要；交叉编译其它平台需，https://ziglang.org/download/，解压后 `export PATH=/.../zig-0.13.0:$PATH`）
+- **cmake**（本机原生 macOS **必需**——`--dynamic` 首次要配置/编译内嵌 quickjs 引擎；可用 portable 版，见 `BUILD.md`；引擎编译产物会缓存，之后不再需要）
 
 ### macOS（本机原生，架构随本机）
 ```bash
