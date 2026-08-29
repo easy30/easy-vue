@@ -74,15 +74,62 @@ jobs:
       - name: Collect Windows artifacts
         run: mv bin/easy-vue-win-*.exe dist/
 
+      # esbuild 配套：npm 官方已发布各平台静态 Go 二进制，直接下载，与对应 easy-vue
+      # 二进制同目录打进 zip。easy-vue 会自动探测同目录 esbuild，部署解压即用。
+      # 版本从 package.json 读取，保证与 easy-vue 内置的 esbuild 版本一致。
+      # 注：macOS runner 默认 bash 3.2 不支持 declare -A 关联数组，故用 case 映射。
+      - name: Bundle esbuild + easy-vue per platform into zips
+        run: |
+          set -euo pipefail
+          ESB_VERSION="$(node -p "require('./package.json').dependencies.esbuild.replace(/^[\^~]/,'')")"
+          echo "esbuild version: $ESB_VERSION"
+          esb_pkg() { case "$1" in
+            mac-arm64) echo darwin-arm64 ;; mac-intel) echo darwin-x64 ;;
+            linux) echo linux-x64 ;; linux-arm64) echo linux-arm64 ;;
+            win-x64) echo win32-x64 ;; win-arm64) echo win32-arm64 ;; esac; }
+          bin_name() { case "$1" in win-*) echo easy-vue.exe ;; *) echo easy-vue ;; esac; }
+          esb_name() { case "$1" in win-*) echo esbuild.exe ;; *) echo esbuild ;; esac; }
+          # Windows 的 esbuild npm 包内二进制是 package/esbuild.exe；mac/linux 是 package/bin/esbuild
+          esb_src() { case "$1" in
+            win-*) echo "/tmp/bundle-${1}/package/esbuild.exe" ;;
+            *) echo "/tmp/bundle-${1}/package/bin/esbuild" ;; esac; }
+          src_name() { case "$1" in
+            win-x64) echo dist/easy-vue-win-x64.exe ;; win-arm64) echo dist/easy-vue-win-arm64.exe ;;
+            *) echo "dist/easy-vue-${1}" ;; esac; }
+          for key in mac-arm64 mac-intel linux linux-arm64 win-x64 win-arm64; do
+            pkg="$(esb_pkg "$key")"
+            echo "== bundle $key ($pkg) =="
+            curl -fsSL "https://registry.npmjs.org/@esbuild/${pkg}/-/${pkg}-${ESB_VERSION}.tgz" -o "/tmp/${key}.tgz"
+            rm -rf "/tmp/bundle-${key}"
+            mkdir -p "/tmp/bundle-${key}"
+            tar xzf "/tmp/${key}.tgz" -C "/tmp/bundle-${key}"
+            mv "$(esb_src "$key")" "/tmp/bundle-${key}/$(esb_name "$key")"
+            chmod +x "/tmp/bundle-${key}/$(esb_name "$key")" || true
+            # easy-vue 二进制（win 用 .exe，其余直接同名）+ 对应 esbuild，同目录
+            cp "$(src_name "$key")" "/tmp/bundle-${key}/$(bin_name "$key")"
+            chmod +x "/tmp/bundle-${key}/$(bin_name "$key")" || true
+            rm -rf "/tmp/bundle-${key}/package"
+            # 打 zip（zip 整个目录，避免因枚举不存在的文件而失败；package 残留已移除）
+            ( cd "/tmp/bundle-${key}" && /usr/bin/zip -r "/tmp/easy-vue-${key}.zip" . >/dev/null )
+            cp "/tmp/easy-vue-${key}.zip" dist/
+          done
+          ls -lh dist/*.zip
+
       - name: List artifacts
         run: ls -lh dist/
 
       # --- 打 tag 时自动创建 Release 并附加全部产物 ---
-      # 显式列出发布产物（不开 glob，避免把 scriptc 的中间 .c 也传上去）
+      # 发布 zip 包（内含对应平台 easy-vue + esbuild，解压即用）；也保留裸二进制便于单独取用
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist/easy-vue-mac-arm64.zip
+            dist/easy-vue-mac-intel.zip
+            dist/easy-vue-linux.zip
+            dist/easy-vue-linux-arm64.zip
+            dist/easy-vue-win-x64.zip
+            dist/easy-vue-win-arm64.zip
             dist/easy-vue-mac-arm64
             dist/easy-vue-mac-intel
             dist/easy-vue-linux
