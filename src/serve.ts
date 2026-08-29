@@ -25,7 +25,10 @@ const ESBUILD = process.env.ESBUILD_BINARY_PATH || 'esbuild';
 function inlineMapComment(map: unknown): string {
   const json = typeof map === 'string' ? map : JSON.stringify(map);
   const b64 = Buffer.from(json, 'utf-8').toString('base64');
-  return '\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + b64;
+  // 必须带前导和结尾换行：sourceMappingURL 是行注释，若其后紧跟（无换行的）代码，
+  // 该行剩余内容会被一并注释掉。结尾换行保证后续 append 的代码（如模板 render 的
+  // import ... from "vue"）从新的一行开始，不会被吞进注释。
+  return '\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + b64 + '\n';
 }
 
 // 简单确定性哈希（8位十六进制）→ 用于 css module 类名
