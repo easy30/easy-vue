@@ -10,18 +10,22 @@
 
 - **触发**：推送 `v*` tag（如 `v1.0.0`）自动发版；也支持在 Actions 界面手动触发（`workflow_dispatch`）。
 - **运行位置**：全部在 **GitHub 托管的远程 runner**（`macos-14`，Intel）上执行，**不依赖本地机器**。本地只需 `git push --tags`。
-- **单台 macOS runner 交叉编译**：用 zig 一次性交叉编译出全部 6 个平台产物，最后 `softprops/action-gh-release` 把产物上传到 Release。
+- **单台 macOS runner 交叉编译**：用 zig 一次性交叉编译出全部 6 个平台产物；随后再从 npm 下载各平台 prebuilt 的 **esbuild**，与对应 easy-vue 二进制**同目录**打成 **zip**，最后 `softprops/action-gh-release` 把 zip 上传到 Release。
 
-### 产物清单（6 个平台二进制）
+### 产物清单（6 个平台 zip 包）
 
-| 产物 | 平台 × 架构 | 说明 |
-|---|---|---|
-| `easy-vue-mac-arm64` | macOS arm64 | `aarch64-macos` 交叉 |
-| `easy-vue-mac-intel` | macOS x86_64 | `x86_64-macos` 交叉 |
-| `easy-vue-linux` | Linux x86_64 | `x86_64-linux-musl`（纯静态） |
-| `easy-vue-linux-arm64` | Linux arm64 | `aarch64-linux-musl` |
-| `easy-vue-win-x64.exe` | Windows x86_64 | `win/build-win.sh`，含 POSIX shim |
-| `easy-vue-win-arm64.exe` | Windows arm64 | `win/build-win.sh`，含 POSIX shim |
+每个 zip 内含对应平台的 `easy-vue` 二进制 + 同目录 `esbuild`（Windows 为 `easy-vue.exe` / `esbuild.exe`）。easy-vue 运行时自动探测同目录 esbuild，**解压即用，无需任何配置/环境变量**。
+
+| 产物（zip） | 平台 × 架构 | easy-vue 编译目标 | esbuild 来源 |
+|---|---|---|---|
+| `easy-vue-mac-arm64.zip` | macOS arm64 | `aarch64-macos` 交叉 | `@esbuild/darwin-arm64` |
+| `easy-vue-mac-intel.zip` | macOS x86_64 | `x86_64-macos` 交叉 | `@esbuild/darwin-x64` |
+| `easy-vue-linux.zip` | Linux x86_64 | `x86_64-linux-musl`（纯静态） | `@esbuild/linux-x64` |
+| `easy-vue-linux-arm64.zip` | Linux arm64 | `aarch64-linux-musl` | `@esbuild/linux-arm64` |
+| `easy-vue-win-x64.zip` | Windows x86_64 | `win/build-win.sh`，含 POSIX shim | `@esbuild/win32-x64` |
+| `easy-vue-win-arm64.zip` | Windows arm64 | `win/build-win.sh`，含 POSIX shim | `@esbuild/win32-arm64` |
+
+> 只发布 zip，不单独发布裸二进制（zip 里已含 easy-vue，避免冗余）。
 
 ---
 
@@ -60,7 +64,7 @@ git push origin v1.0.0
 ## 三、验证发布结果
 
 ### 用浏览器
-打开 `https://github.com/easy30/easy-vue/releases`，确认 `v1.0.0` 的 6 个二进制都出现。
+打开 `https://github.com/easy30/easy-vue/releases`，确认 `v1.0.0` 的 6 个 zip 包都出现。
 
 ### 用 API（私有仓库需认证 token，可复用 git 本地凭据）
 
@@ -108,18 +112,18 @@ Node.js v20.20.2
    curl -s -X DELETE -H "Authorization: Bearer $TOKEN" \
      "https://api.github.com/repos/easy30/easy-vue/releases/assets/<asset_id>"
    ```
-2. **防止复发**：把 `softprops/action-gh-release` 的 `files` 从 `dist/*` 改为**显式白名单**，只列 6 个二进制：
+2. **防止复发**：把 `softprops/action-gh-release` 的 `files` 从 `dist/*` 改为**显式白名单**，只列 6 个 zip：
    ```yaml
    - name: Upload release assets
      uses: softprops/action-gh-release@v2
      with:
        files: |
-         dist/easy-vue-mac-arm64
-         dist/easy-vue-mac-intel
-         dist/easy-vue-linux
-         dist/easy-vue-linux-arm64
-         dist/easy-vue-win-x64.exe
-         dist/easy-vue-win-arm64.exe
+         dist/easy-vue-mac-arm64.zip
+         dist/easy-vue-mac-intel.zip
+         dist/easy-vue-linux.zip
+         dist/easy-vue-linux-arm64.zip
+         dist/easy-vue-win-x64.zip
+         dist/easy-vue-win-arm64.zip
        generate_release_notes: true
    ```
 

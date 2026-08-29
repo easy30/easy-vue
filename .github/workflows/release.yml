@@ -118,8 +118,8 @@ jobs:
       - name: List artifacts
         run: ls -lh dist/
 
-      # --- 打 tag 时自动创建 Release 并附加全部产物 ---
-      # 发布 zip 包（内含对应平台 easy-vue + esbuild，解压即用）；也保留裸二进制便于单独取用
+      # --- 只发布 zip 包（内含对应平台 easy-vue + esbuild，解压即用） ---
+      # 不单独发布裸二进制：zip 里已含 easy-vue，避免冗余。
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -130,10 +130,4 @@ jobs:
             dist/easy-vue-linux-arm64.zip
             dist/easy-vue-win-x64.zip
             dist/easy-vue-win-arm64.zip
-            dist/easy-vue-mac-arm64
-            dist/easy-vue-mac-intel
-            dist/easy-vue-linux
-            dist/easy-vue-linux-arm64
-            dist/easy-vue-win-x64.exe
-            dist/easy-vue-win-arm64.exe
           generate_release_notes: true
