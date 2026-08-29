@@ -167,7 +167,8 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
   let scriptMap: any = null;
   if (d.scriptSetup || d.script) {
     const s = compileScript(d, { id: 'ev' });
-    let code = s.content;
+    // 把 default 导出捕获为局部变量 __sfc__，随后把模板 render 挂到它上面再导出
+    let code = s.content.replace(/export default/, 'const __sfc__ =');
     if (wantMap && s.map) scriptMap = s.map;
 
     // 注入 css module 绑定：直接把类名映射字面量暴露到 setup 返回（$style / 具名模块）。
@@ -197,7 +198,7 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
       if (wantMap && scriptMap) js += inlineMapComment(scriptMap);
     }
   } else {
-    js += 'export default {}\n';
+    js += 'const __sfc__ = {}\n';
   }
 
   // 3. 非 sourcemap 模式加头部注释（sourcemap 模式不加，保证 script 从第 0 行起，map 无需平移）
@@ -205,14 +206,16 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
     js = '// compiled by @vue/compiler-sfc via easy-vue\n' + js;
   }
 
-  // 4. template（cssModules 使模板 $style.X / m1.X 被解析成 _ctx 引用）
+  // 4. template（cssModules 使模板 $style.X / m1.X 被解析成 _ctx 引用），并挂到组件对象上
   if (d.template) {
     const r = compileTemplate({ source: d.template.content, filename, id: 'ev', cssModules } as any);
     if (r.errors && r.errors.length > 0) {
       throw new Error('template errors: ' + JSON.stringify(r.errors));
     }
     js += r.code + '\n';
+    js += '__sfc__.render = render;\n';
   }
+  js += 'export default __sfc__;\n';
 
   const css = cssParts.join('\n');
   return { js, css };
