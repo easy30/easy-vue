@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * easy-vue Java 客户端。
+ * easy-vue Java 客户端（实现 {@link VueCompiler}）。
  *
  * <p>对应 easy-vue 的 HTTP `serve` 模式。</p>
  * <ul>
@@ -22,12 +22,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>就绪判断：进程启动后，easy-vue 需要 ~200-350ms 初始化内嵌引擎并绑定端口。
  * 本客户端启动进程后对每个端口做<b>轮询 connect 探测</b>，真正能连上（服务就绪）
  * 才返回，避免「进程起了但端口还没好」导致首个请求失败。</p>
+ *
+ * <p>Java 8 兼容；无第三方依赖。</p>
  */
-public class EasyVueHttpClient implements AutoCloseable {
+public class EasyVueHttpClient implements AutoCloseable, VueCompiler {
 
     private final int connectTimeoutMs;
     private final int readTimeoutMs;
-    private final List<Backend> backends = new ArrayList<>();
+    private final List<Backend> backends = new ArrayList<Backend>();
     private final AtomicInteger roundRobin = new AtomicInteger(0);
 
     private EasyVueHttpClient(int connectTimeoutMs, int readTimeoutMs) {
@@ -70,9 +72,21 @@ public class EasyVueHttpClient implements AutoCloseable {
         return start(binaryPath, processCount, 5000, 30000);
     }
 
+    /**
+     * 依据配置创建 easy-vue 客户端（仅供 {@link VueCache#create} 使用）。
+     * 包装 IOException 为 UncheckedIOException，便于配置驱动的工厂调用。
+     */
+    public static EasyVueHttpClient startQuiet(VueConfig config) {
+        try {
+            return start(config.getVuePath(), config.getProcessCount(),
+                       config.getConnectTimeoutMs(), config.getReadTimeoutMs());
+        } catch (IOException e) {
+            throw new UncheckedIOException("failed to start easy-vue: " + config.getVuePath(), e);
+        }
+    }
+
     /* ── 启动 ─────────────────────────────────────────────────────────────── */
 
-    /** 客户端自己找一个空闲端口。 */
     private static int findFreePort() throws IOException {
         try (ServerSocket s = new ServerSocket(0)) {
             return s.getLocalPort();
@@ -80,7 +94,6 @@ public class EasyVueHttpClient implements AutoCloseable {
         // 注：close 后到 easy-vue 真正 bind 之间有一极小竞争窗口，内网工具通常可接受。
     }
 
-    /** 非阻塞启动一个 easy-vue serve 进程；输出丢弃（端口已知，无需读 stdout）。 */
     private static Process spawn(String binaryPath, int port) throws IOException {
         ProcessBuilder pb = new ProcessBuilder(binaryPath, "serve", "127.0.0.1:" + port);
         // 丢弃输出：避免管道缓冲阻塞 easy-vue，也不需要读。兼容 Java 8（无 DISCARD）。
@@ -89,7 +102,6 @@ public class EasyVueHttpClient implements AutoCloseable {
         return pb.start();   // 非阻塞返回；easy-vue 在子进程常驻提供 HTTP
     }
 
-    /** 就绪探测：对所有端口轮询 connect，全部能连上才返回；超时抛异常。 */
     private void waitReady() throws IOException {
         long deadline = System.currentTimeMillis() + 10_000;
         for (Backend b : backends) {
@@ -120,8 +132,9 @@ public class EasyVueHttpClient implements AutoCloseable {
 
     /** 编译源码。type: vue / ts / js。返回编译结果的 JSON 文本（含 ok/js/css/error）。 */
     public String compile(String type, String source, String filename, Boolean sourcemap) throws IOException {
-        StringBuilder body = new StringBuilder("{");
-        appendField(body, "id", "0");
+        StringBuilder body = new StringBuilder();
+        body.append('{');
+        body.append("\"id\":0");
         appendField(body, "type", type);
         appendField(body, "source", source);
         appendField(body, "filename", filename);
@@ -133,12 +146,42 @@ public class EasyVueHttpClient implements AutoCloseable {
         return post(nextBackend().baseUrl + "/compile", body.toString());
     }
 
-    /** 便捷：编译 .vue 源码。返回 {ok,js,css,error} 的 JSON 文本。 */
-    public String compileVue(String source, String filename) throws IOException {
-        return compile("vue", source, filename, null);
+    /** 实现 {@link VueCompiler} 接口：将 VueCompileRequest 桥接到 HTTP 调用。 */
+    @Override
+    public VueCompileResult compile(VueCompileRequest request) {
+        try {
+            String json = compile(request.getType(), request.getSource(),
+                              request.getFilename(), request.isSourcemap() ? Boolean.TRUE : null);
+            VueCompileResult r = new VueCompileResult();
+            if (json.contains("\"ok\":true")) {
+                r.setOk(true);
+                r.setJs(extractString(json, "js"));
+                r.setCss(extractString(json, "css"));
+                return r;
+            }
+            r.setOk(false);
+            r.setError(extractString(json, "error"));
+            return r;
+        } catch (IOException e) {
+            return VueCompileResult.failure(String.valueOf(e.getMessage()));
+        }
     }
 
-    /** 轮询选择一个后端。 */
+    /** 从简易 JSON 中抽取一个字符串字段值（服务端已内联 \n 等转义）。 */
+    private static String extractString(String json, String key) {
+        String needle = "\"" + key + "\":\"";
+        int i = json.indexOf(needle);
+        if (i < 0) return null;
+        int start = i + needle.length();
+        int end = start;
+        while (end < json.length() && json.charAt(end) != '"') {
+            if (json.charAt(end) == '\\') end++;
+            end++;
+        }
+        if (end > json.length()) end = json.length();
+        return json.substring(start, end).replace("\\n", "\n").replace("\\\"", "\"");
+    }
+
     private Backend nextBackend() {
         if (backends.isEmpty()) throw new IllegalStateException("no easy-vue backend");
         int idx = Math.floorMod(roundRobin.getAndIncrement(), backends.size());

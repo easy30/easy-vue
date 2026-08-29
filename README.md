@@ -152,25 +152,40 @@ HTTP 模式天然支持并发、可设连接/读超时、可中断 —— 调用
 
 ## 五、与 easy-vue4j 集成
 
-easy-vue4j 通过 `VueCompiler` 接口对接本工具（**HTTP 模式**）：
-- `EasyVueHttpClient`（HTTP `POST /compile`，走 `serve` 常驻；可并发、可设超时、无僵死）
+easy-vue4j（Java 8，零依赖）通过 **`VueCompiler` 抽象接口**对接本工具。参考实现在本仓库 [easy-vue4j/src/main/java/com/easyvue/](easy-vue4j/src/main/java/com/easyvue/)。
 
-参考实现已在本仓库 [easy-vue4j/src/main/java/com/easyvue/EasyVueHttpClient.java](easy-vue4j/src/main/java/com/easyvue/EasyVueHttpClient.java)：
+### 两种编译实现（配置驱动切换）
+
+| 实现 | 说明 | 何时使用 |
+|---|---|---|
+| `EasyVueHttpClient` | 调 easy-vue 原生二进制（HTTP 常驻），真实编译 vue/ts | 配置的 `easy-vue.path` 存在 |
+| `JavaVueCompiler` | 纯 Java 回退（不依赖二进制） | `easy-vue.path` 未配置/不存在 |
+
+约定：配置项 `easy-vue.path`（或环境变量 `EASY_VUE_PATH`）**指向的二进制存在 → 用 easy-vue**，否则纯 Java。
+
+### EasyVueHttpClient 特性（自定端口 + 指定进程数）
 - **客户端自定端口**：启动前自挑空闲端口传给 easy-vue，天然知端口，无需读 stdout/注册文件。
 - **指定进程数**：`EasyVueHttpClient.start(bin, N)` 自动起 N 个 serve 进程（N 核并行），内部轮询分发。
-- **就绪探测**：启动后逐端口轮询 connect，服务真正就绪才返回。
+- **就绪探测**：启动后逐端口轮询 connect，服务就绪（~几百 ms）才返回。
+- **非阻塞启动 + Java8 兼容**：`ProcessBuilder.start()` 立刻返回，`close()` 统一清理。
+
+### 用法
 
 ```java
-// 单进程（等价连固定端口）
-EasyVueHttpClient ef = new // ... 或
-EasyVueHttpClient ef = EasyVueHttpClient.start("/path/to/easy-vue-bin", 1);
+// 配置驱动：有 easy-vue 二进制 → easy-vue；否则 → 纯 Java
+VueConfig config = VueConfig.fromSystemProperties();   // -Deasy-vue.path=...
+VueCache cache = VueCache.create(config);
 
-// 多进程水平扩展：N 个进程 = N 核并行
-EasyVueHttpClient ef = EasyVueHttpClient.start("/path/to/easy-vue-bin", 4);
-vueCache.setCompiler(new EasyVueCompiler(ef));
+// 编译（带缓存）
+VueCompileResult r = cache.compile(VueCompileRequest.of("vue", source, "hello.vue"));
 ```
 
----
+```java
+// 或直接指定二进制 + 进程数（水平扩展：N 进程 = N 核并行）
+EasyVueHttpClient ef = EasyVueHttpClient.start("/path/to/easy-vue-bin", 4);
+VueCompileResult r = ef.compile(VueCompileRequest.of("vue", source, "a.vue"));
+ef.close();
+```
 
 ## 六、水平扩展（多进程）
 
