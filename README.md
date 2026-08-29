@@ -152,7 +152,7 @@ HTTP 模式天然支持并发、可设连接/读超时、可中断 —— 调用
 
 ## 五、与 easy-vue4j 集成
 
-easy-vue4j（Java 8，零依赖）通过 **`VueCompiler` 抽象接口**对接本工具。参考实现在本仓库 [easy-vue4j/src/main/java/com/easyvue/](easy-vue4j/src/main/java/com/easyvue/)。
+easy-vue4j（Java 8，零依赖）通过 **`VueCompiler` 抽象接口**对接本工具。参考实现在本仓库 [easy-vue4j（独立项目 github.com/easy30/easy-vue4j）。
 
 ### 两种编译实现（配置驱动切换）
 
