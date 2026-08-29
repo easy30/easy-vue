@@ -19,7 +19,35 @@ import { parse, compileScript, compileTemplate, compileStyle } from '@vue/compil
 import remapping from '@ampproject/remapping';
 
 const BUF = Buffer.alloc(1);
-const ESBUILD = process.env.ESBUILD_BINARY_PATH || 'esbuild';
+
+/**
+ * 定位 esbuild 可执行文件（.ts / <script lang=ts> / @api 转译用）。
+ * 优先级：
+ *   1. 环境变量 ESBUILD_BINARY_PATH（Java 集成侧已用 EsbuildUtil 定位后传入）
+ *   2. 二进制自身同目录下的 esbuild（zip 随 easy-vue 一起分发的场景，免配）
+ *   3. PATH 里的裸命令 esbuild（兜底）
+ * process.argv[1] 在 scriptc 原生产物里是「二进制自身路径」（绝对或相对 cwd），
+ * 由此可推导同目录布局。
+ */
+function resolveEsbuild(): string {
+  if (process.env.ESBUILD_BINARY_PATH) {
+    return process.env.ESBUILD_BINARY_PATH;
+  }
+  const self = process.argv[1] as any as string;
+  if (self) {
+    const slash = self.lastIndexOf('/');
+    // argv[1] 可能是 '/abs/easy-vue'、'./easy-vue'、'easy-vue'
+    const dir = slash >= 0 ? self.substring(0, slash) : '.';
+    const dirExe = slash >= 0 ? dir + '/esbuild' : 'esbuild';
+    try {
+      if (existsSync(dirExe)) return dirExe;
+    } catch (e) {
+      // 忽略 stat 失败，继续回退
+    }
+  }
+  return 'esbuild';
+}
+const ESBUILD = resolveEsbuild();
 
 // UTF-8 → base64：用 scriptc 原生 Buffer 支持
 function inlineMapComment(map: unknown): string {
