@@ -129,4 +129,5 @@ curl -s -XPOST 127.0.0.1:9000/compile -d '{"filename":"/no/such.vue"}'
 ## 六、集成到其他服务
 
 - **Java**：推荐用 [easy-vue4j](https://github.com/easy30/easy-vue4j)，通过 `vue4j.easy-vue.path` 配置 easy-vue 可执行文件路径（缺失时自动按平台下载），内部用 HTTP 常驻模式调用。
+- **Python**：参考 [`demo/python/`](./demo/python/)（FastAPI + Uvicorn + easy-vue 一体化前后端演示，`./setup.sh` + `uvicorn main:app` 即跑）。
 - **任意后端**：把「启动一个 `serve` 进程 + `POST /compile`」这套协议集成进自己服务即可；多进程水平扩展 = 多开几个 `serve` 端口 + 自己调度（见 develop.md）。
