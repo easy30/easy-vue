@@ -33,10 +33,11 @@
 
 ## 二、启动
 
-easy-vue 有**两种运行模式**：
+easy-vue 有**两种运行模式**（外加一个查询命令）：
 
 - **`serve [host:]port`** — HTTP 常驻服务（**推荐**，可并发、可设超时、可多次复用）。必须显式指定端口；缺省绑定 `127.0.0.1`（仅本机），远程访问用 `0.0.0.0:port`。
 - **`convert`** — 一次性：从 stdin 读一行 JSON → 编译 → stdout 出一行 JSON → 退出。
+- **`--version` / `version`** — 打印内置版本号后退出（如 `easy-vue v1.2.0`），用于确认二进制版本。
 
 ```bash
 # 本机 HTTP 常驻（端口 9000）
@@ -51,6 +52,8 @@ easy-vue 有**两种运行模式**：
 
 **无状态**：每次请求都重新编译、不缓存（缓存策略由调用方决定）。
 
+**版本**：`./easy-vue --version` 输出内置版本号（如 `easy-vue v1.2.0`）；版本号唯一出处是仓库根目录 `VERSION` 文件，构建时注入二进制（见 RELEASE.md）。
+
 ---
 
 ## 三、调用协议
@@ -62,7 +65,7 @@ easy-vue 有**两种运行模式**：
 | `id` | number | 请求 id（可选），成功时随响应回显 |
 | `type` | string | `vue` / `ts` / `js`；缺省按 `filename` 扩展名推断 |
 | `source` | string | 源码内容（优先） |
-| `filename` | string | 文件名/路径：有 `source` 时作名字；无 `source` 时用它读文件 |
+| `filename` | string | 文件名/路径：用作编译时的名字（`__name` / sourcemap / type 推断）。有 `source` 时必须带；**serve(HTTP) 模式只允许这种方式**，绝不按 filename 读服务器本地文件 |
 | `sourcemap` | boolean | `true` 时产出内联 sourcemap（默认不产） |
 
 ### 响应（JSON）
@@ -102,11 +105,15 @@ echo '{"type":"vue","source":"<template><div>{{n}}</div></template>","filename":
 # → {"id":null,"ok":true,"js":"...","css":""}
 ```
 
-### 错误示例（文件不存在）
+### 错误示例
 
 ```bash
-echo '{"filename":"/no/such.vue"}' | ./easy-vue convert
+# convert（本地可信）允许无 source 按 filename 读文件；文件不存在时
 # → {"id":null,"ok":false,"error":"file not found: /no/such.vue"}
+
+# serve（HTTP）模式：禁止按 filename 读服务器本地文件，只接受 source
+curl -s -XPOST 127.0.0.1:9000/compile -d '{"filename":"/no/such.vue"}'
+# → {"id":null,"ok":false,"error":"reading server files by \"filename\" is disabled in serve mode; provide \"source\" instead"}
 ```
 
 ---

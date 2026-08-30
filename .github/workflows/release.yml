@@ -15,6 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 从 VERSION 生成 src/version.ts，把版本号注入到即将编译的所有平台二进制里
+      # （单一事实来源：仓库根目录 VERSION；git tag 也用同一 v 前缀版本号）
+      - name: Generate version from VERSION
+        run: ./scripts/gen-version.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22

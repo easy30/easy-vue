@@ -13,6 +13,7 @@
 export PATH="/path/to/cmake/data/bin:$PATH"
 
 cd /Users/apple/github/easy-vue
+./scripts/gen-version.sh   # 从 VERSION 生成 src/version.ts(把版本号注入二进制;改版本号后必须重跑)
 node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-vue-bin
 ```
 

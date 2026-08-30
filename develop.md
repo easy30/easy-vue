@@ -26,14 +26,18 @@ easy-vue/
 
 - **`serve [host:]port`** — **HTTP 常驻**服务：**必须显式指定端口**（无默认，避免冲突），`POST /compile` 编译并返回 JSON。缺省绑定 `127.0.0.1`（仅本机，安全）；远程访问须 `0.0.0.0:port`。**调用方用标准 HTTP client（可并发、可设超时、可中断），无管道僵死风险**。
 - **`convert`** — **一次性**：从 stdin 读一行请求 JSON → 编译 → 写一行响应 JSON → **退出**（不常驻）。适合单次调用；多次调用建议用 `serve`（避免反复起进程）。
+- **`--version` / `version`** — 打印内置版本号后退出（如 `easy-vue v1.2.0`），用于确认二进制版本。
 
 ```
 easy-vue serve 127.0.0.1:9000   # 本机，显式端口
 easy-vue serve 0.0.0.0:9000     # 远程访问
 easy-vue convert           # 一次性 stdin→stdout
+easy-vue --version         # 打印版本
 ```
 
 **无状态**：每次请求都重新编译，不缓存（缓存策略由调用方决定，如 Java 的 `VueCache`）。
+
+**版本号**：唯一事实来源是仓库根目录 `VERSION`（统一 v 前缀）。构建前用 `scripts/gen-version.sh` 从 `VERSION` 生成 `src/version.ts` 注入二进制（见「二、编译」）。
 
 ---
 
@@ -46,7 +50,10 @@ easy-vue convert           # 一次性 stdin→stdout
 - **cmake**（本机原生 macOS **必需**——`--dynamic` 首次要配置/编译内嵌 quickjs 引擎；可用 portable 版，见 `mac-local-build.md`；引擎编译产物会缓存，之后不再需要）
 
 ### macOS（本机原生，架构随本机）
+> 构建前先 `./scripts/gen-version.sh` 从 `VERSION` 生成 `src/version.ts`（把版本号注入二进制）。
+
 ```bash
+./scripts/gen-version.sh        # 从 VERSION 生成 src/version.ts（版本注入）
 node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-vue-bin
 ```
 
@@ -108,7 +115,7 @@ export ESBUILD_BINARY_PATH=/absolute/path/to/esbuild   # 启动前设置
 | `id` | number | 请求 id（可选），成功时随响应回显 |
 | `type` | string | `vue` / `ts` / `js`；缺省按 `filename` 扩展名推断 |
 | `source` | string | 源码内容（优先） |
-| `filename` | string | 文件名/路径：有 `source` 时作名字；无 `source` 时用它读文件（该文件需可读） |
+| `filename` | string | 文件名/路径：用作编译时的名字（`__name` / sourcemap / type 推断），有 `source` 时必须带。**serve(HTTP) 模式只允许这种方式**，绝不按 filename 读服务器本地文件（避免任意文件读取泄露）；仅本地可信的 `convert` 模式允许无 `source` 时按 filename 读文件（该文件需可读） |
 | `sourcemap` | boolean | `true` 时产出内联 sourcemap（默认不产） |
 
 ### 响应（JSON）

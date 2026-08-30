@@ -31,6 +31,21 @@
 
 ## 二、发版步骤
 
+### 0. 版本号（唯一事实来源 = 根目录 VERSION 文件）
+
+- 版本号**统一带 v 前缀**，唯一的出处是仓库根目录 **`VERSION`** 文件（如 `v1.2.0`）。
+- 二进制内置版本由它注入：构建时 `scripts/gen-version.sh` 从 `VERSION` 生成 `src/version.ts`，
+  `easy-vue --version` / `easy-vue version` 即输出该版本。
+- **发版前先把 `VERSION` 改成目标版本并提交**（例如从 `v1.1.0` 改成 `v1.2.0`）；
+  **git tag 必须与 `VERSION` 一致**（同一 v 前缀版本号）——CI 不会强制校验，靠发版人保证二者同步。
+
+```bash
+echo v1.2.0 > VERSION          # 改版本号
+./scripts/gen-version.sh       # 同步 src/version.ts（验证：输出 version=... ）
+git add -A
+git commit -m "v1.2.0"        # 提交版本号+
+```
+
 ### 1. 提交改动并推送到 main
 
 ```bash
@@ -41,9 +56,11 @@ git push origin main
 
 ### 2. 打 tag 并推送（触发构建）
 
+> tag 必须等于 `VERSION` 内容（如 `VERSION` 为 `v1.2.0` 就 `git tag v1.2.0`）。
+
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
 
 > **重建已存在的 tag**（比如修复后想重发同版本）：

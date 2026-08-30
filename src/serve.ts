@@ -1,6 +1,8 @@
 // easy-vue 模式1 · 无状态前端编译器（scriptc 原生二进制）
 // 协议：stdin 每行一个 JSON 请求，stdout 每行一个 JSON 响应 / HTTP POST /compile
-//   入 {"id", "type":"vue"|"ts"|"js", "source"?|"filename"?, "sourcemap"?:boolean}
+//   入 {"id", "type":"vue"|"ts"|"js", "source", "filename"?, "sourcemap"?:boolean}
+//   安全：serve(HTTP) 模式必须提供 source，filename 仅作编译时的名字/type 推断，绝不读服务器本地文件。
+//         仅本地可信的 convert 模式允许只给 filename 按服务器本地文件读取。
 //   出 {"id","ok","js"?,"css"?,"error"?}
 // sourcemap=true 时产出内联 sourcemap，多级完整支持：
 //   - ts/js    → esbuild --sourcemap=inline（--sourcefile 指向真实文件名）
@@ -17,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse, compileScript, compileTemplate, compileStyle } from '@vue/compiler-sfc';
 import remapping from '@ampproject/remapping';
+import { EASY_VUE_VERSION } from './version';
 
 const BUF = Buffer.alloc(1);
 
@@ -301,7 +304,7 @@ function rewriteCssModuleClasses(css: string, moduleName: string, hashFn: (n: st
 interface Req { id?: number; type?: string; source?: string; filename?: string; sourcemap?: boolean; }
 interface Resp { id: number | null; ok: boolean; js?: string; css?: string; error?: string; }
 
-function handleReq(line: string): string {
+function handleReq(line: string, allowRead: boolean): string {
   const req: Req = JSON.parse(line);
   const id: number | null = req.id === undefined ? null : req.id;
   const wantMap = !!req.sourcemap;
@@ -310,6 +313,11 @@ function handleReq(line: string): string {
   let source = req.source;
   if (source === undefined) {
     if (req.filename == null) throw new Error('request needs "source" or a readable "filename"');
+    // 安全：serve(HTTP) 模式下禁止按 filename 读服务器本地文件，避免任意文件读取泄露。
+    // 只有本地可信的 convert 模式允许按 filename 读取。
+    if (!allowRead) {
+      throw new Error('reading server files by "filename" is disabled in serve mode; provide "source" instead');
+    }
     if (!existsSync(req.filename)) throw new Error('file not found: ' + req.filename);
     source = readFileSync(req.filename, 'utf-8');
   }
@@ -342,9 +350,9 @@ function readLine(): string | null {
   }
 }
 
-function compileJson(reqJson: string): string {
+function compileJson(reqJson: string, allowRead: boolean): string {
   try {
-    return handleReq(reqJson);
+    return handleReq(reqJson, allowRead);
   } catch (e) {
     return JSON.stringify({ id: null, ok: false, error: String((e as Error).message || e) } as Resp);
   }
@@ -375,7 +383,7 @@ function serve(arg: string) {
         return;
       }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(compileJson(body));
+      res.end(compileJson(body, false));
     });
     req.on('error', () => {
       res.writeHead(400, { 'content-type': 'application/json' });
@@ -383,20 +391,21 @@ function serve(arg: string) {
     });
   });
   server.listen(Number(listenPort), listenHost, () => {
-    process.stdout.write('__READY__\n');
+    process.stdout.write('__READY__ easy-vue ' + EASY_VUE_VERSION + '\n');
   });
 }
 
 function convert() {
   const line = readLine();
   if (line === null) return;
-  if (line) process.stdout.write(compileJson(line) + '\n');
+  if (line) process.stdout.write(compileJson(line, true) + '\n');
 }
 
 function usage() {
-  process.stdout.write('usage: easy-vue serve [host:]port | convert\n' +
-    '  serve   HTTP 常驻（必须指定端口，如 0.0.0.0:9000；或设 SF_HOST/SF_PORT），POST /compile\n' +
-    '  convert stdin 读一行 JSON 编译后写一行输出即退出\n');
+  process.stdout.write('usage: easy-vue serve [host:]port | convert | --version\n' +
+    '  serve      HTTP 常驻（必须指定端口，如 0.0.0.0:9000；或设 SF_HOST/SF_PORT），POST /compile\n' +
+    '  convert    stdin 读一行 JSON 编译后写一行输出即退出\n' +
+    '  --version  打印版本后退出\n');
 }
 
 function main() {
@@ -408,6 +417,10 @@ function main() {
     return;
   }
   if (argv.indexOf('convert') >= 0) { convert(); return; }
+  if (argv.indexOf('--version') >= 0 || argv.indexOf('version') >= 0) {
+    process.stdout.write('easy-vue ' + EASY_VUE_VERSION + '\n');
+    return;
+  }
   usage();
 }
 main();
