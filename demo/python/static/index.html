@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+<title>easy-vue python demo</title>
+<meta charset="utf-8">
+<script type="importmap">{"imports":{"vue":"/vendor/vue.esm-browser.js",
+"vue-router":"/vendor/vue-router.esm-browser.js",
+"@vue/devtools-api":"/vendor/devtools-api.js"}}</script>
+<style>body{font-family:sans-serif;margin:40px}nav a{margin-right:12px}</style>
+</head>
+<body>
+<nav><a href="#/">Home</a> | <a href="#/about">About</a> | <a href="#/users">Users</a></nav>
+<div id="app"></div>
+<script type="module">
+import { createApp, h } from 'vue';
+import { createRouter, createWebHashHistory, RouterView } from 'vue-router';
+import Home  from '/views/home.vue';      /* ← 后端现场把 .vue 编译成 JS */
+import About from '/views/about.vue';
+import Users from '/views/users.vue';
+const router = createRouter({ history: createWebHashHistory(),
+  routes: [{ path: '/', component: Home }, { path: '/about', component: About },
+           { path: '/users', component: Users }] });
+// 根组件必须渲染 <router-view>，否则路由匹配到的组件无处挂载会渲染成空。
+createApp({ render: () => h(RouterView) }).use(router).mount('#app');
+</script>
+</body>
+</html>
