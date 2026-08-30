@@ -59,6 +59,24 @@ function inlineMapComment(map: unknown): string {
   return '\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + b64 + '\n';
 }
 
+// 规范化 sourcemap 的 sources：把相对路径改成独立绝对虚拟路径（webpack://easy-vue/ 前缀）。
+// 否则 devtools 会把相对 source 拼到编译后脚本所在目录，产生错误的重复路径
+//（如 /views/views/home.vue），且源码与编译产物同 URL 冲突。
+function normalizeMapSources(map: any): any {
+  if (!map || !map.sources || typeof map.sources.length !== 'number') return map;
+  const vs: string[] = [];
+  for (let i = 0; i < map.sources.length; i++) {
+    const s = String(map.sources[i]);
+    const clean = s.replace(/^\/?/, "");
+    vs.push("webpack://easy-vue/" + clean);
+  }
+  map.sources = vs;
+  // 相对路径不再依赖 sourceRoot；清掉避免干扰
+  map.sourceRoot = "";
+  return map;
+}
+
+
 // 简单确定性哈希（8位十六进制）→ 用于 css module 类名
 function cssHash(name: string, seed: string): string {
   let h = 2166136261;
@@ -143,7 +161,7 @@ function transpileScriptTs(code: string, filename: string, scriptMap: any): stri
       }
     }
   }
-  return esb.code + inlineMapComment(esb.map);
+  return esb.code + inlineMapComment(normalizeMapSources(esb.map));
 }
 
 // 解析 <style module> / <style module="m1"> 的模块名（无名字返回空串=默认 $style）
@@ -236,7 +254,7 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
       js += transpileScriptTs(code, filename, wantMap ? scriptMap : null);
     } else {
       js += code + '\n';
-      if (wantMap && scriptMap) js += inlineMapComment(scriptMap);
+      if (wantMap && scriptMap) js += inlineMapComment(normalizeMapSources(scriptMap));
     }
   } else {
     js += 'const __sfc__ = {}\n';
