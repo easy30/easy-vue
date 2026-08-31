@@ -7,8 +7,9 @@
 // sourcemap=true 时产出内联 sourcemap，多级完整支持：
 //   - ts/js    → esbuild --sourcemap=inline（--sourcefile 指向真实文件名）
 //   - vue      → <script>/<script setup lang="ts"> 段经 esbuild 转译去类型后，
-//               用 @ampproject/remapping 将 esbuild map 与 compiler-sfc map 逐级复合，
-//               最终 source 指向原始 .vue 文件（sourcesContent 保留脚本原文）
+//               用 @ampproject/remapping 将 esbuild map 与 compiler-sfc map 逐级复合；
+//               template 段 map（模板局部坐标）平移到全文件坐标后，与 script 段 map
+//               合并为一张覆盖整个产物的 map，统一指向原始 .vue，并按规范置于产物最后一行
 //   - <style module>/<style module="m1">  → 注入 useCssModule 绑定（$style / 具名模块），
 //               模板 .X 与样式哈希类名一致（自定义哈希，CSS 与模板共用同一映射）
 // 无缓存：每次请求都重新编译（缓存策略由调用方决定）
@@ -53,9 +54,8 @@ const ESBUILD = resolveEsbuild();
 function inlineMapComment(map: unknown): string {
   const json = typeof map === 'string' ? map : JSON.stringify(map);
   const b64 = Buffer.from(json, 'utf-8').toString('base64');
-  // 必须带前导和结尾换行：sourceMappingURL 是行注释，若其后紧跟（无换行的）代码，
-  // 该行剩余内容会被一并注释掉。结尾换行保证后续 append 的代码（如模板 render 的
-  // import ... from "vue"）从新的一行开始，不会被吞进注释。
+  // 必须带前导换行：sourceMappingURL 是行注释，前导换行保证它独占一行。
+  // 规范要求该注释位于生成文件最后一行——现在只在整段 js 拼接完成后调用一次，天然满足。
   return '\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,' + b64 + '\n';
 }
 
@@ -67,6 +67,8 @@ function normalizeMapSources(map: any): any {
   const vs: string[] = [];
   for (let i = 0; i < map.sources.length; i++) {
     const s = String(map.sources[i]);
+    // 幂等：已带前缀的不再重复加（合并流程里可能对同一 map 多次规范化）
+    if (s.indexOf('webpack://') === 0) { vs.push(s); continue; }
     const clean = s.replace(/^\/?/, "");
     vs.push("webpack://easy-vue/" + clean);
   }
@@ -117,7 +119,7 @@ function esbuildInline(source: string, loader: string, sourceName: string): stri
  * 用 remapping 把 esbuild map（产物→script 内容）与 compiler-sfc map（script 内容→.vue）复合，
  * 得到最终指向 .vue 的完整 sourcemap。
  */
-function transpileScriptTs(code: string, filename: string, scriptMap: any): string {
+function transpileScriptTs(code: string, filename: string, scriptMap: any): { code: string; map: any } {
   const esb = esbuildTranspileWithMap(code, filename + '.ts');
   map: {
     const scriptMapAny = scriptMap;
@@ -142,7 +144,9 @@ function transpileScriptTs(code: string, filename: string, scriptMap: any): stri
         version: 3,
         file: sources.length > 0 ? sources[0] : tempFile,
         sourceRoot: '',
-        sources: scriptMapAny.sources,
+        // remapping 会把叶子 sources 解析到根 source 所在目录（临时目录），
+        // 这里改成绝对虚拟路径，让最终 source 干净地落在 /views/xxx.vue
+        sources: scriptMapAny.sources.map((s: string) => '/' + String(s).replace(/^\/?/, '')),
         names: scriptMapAny.names || [],
         mappings: scriptMapAny.mappings,
         sourcesContent: scriptMapAny.sourcesContent,
@@ -161,7 +165,152 @@ function transpileScriptTs(code: string, filename: string, scriptMap: any): stri
       }
     }
   }
-  return esb.code + inlineMapComment(normalizeMapSources(esb.map));
+  // 返回未规范化的原始 map，sources 统一由 mergeBlockMaps 处理
+  return { code: esb.code, map: esb.map };
+}
+
+const B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+// sourcemap VLQ 编码单个整数（支持负数）
+function vlqEncode(n: number): string {
+  let v = n < 0 ? ((-n) << 1) | 1 : n << 1;
+  let out = '';
+  do {
+    let digit = v & 31;
+    v >>>= 5;
+    if (v > 0) digit |= 32;
+    out += B64_CHARS.charAt(digit);
+  } while (v > 0);
+  return out;
+}
+
+// 解码 mappings：按生成行返回段数组（绝对坐标；仅一个字段的段表示无源位置）
+function decodeMappings(map: any): any[][] {
+  const out: any[][] = [];
+  let srcIdx = 0, srcLine = 0, srcCol = 0, nameIdx = 0;
+  const lines = String(map.mappings).split(';');
+  for (let li = 0; li < lines.length; li++) {
+    const segs: any[] = [];
+    const line = lines[li];
+    if (line !== '') {
+      let genCol = 0;
+      const raw = line.split(',');
+      for (let si = 0; si < raw.length; si++) {
+        const str = raw[si];
+        if (str === '') continue;
+        let i = 0;
+        const nextVal = () => {
+          let v = 0, shift = 0, cont = 1;
+          while (cont) {
+            const d = B64_CHARS.indexOf(str.charAt(i));
+            i++;
+            if (d < 0) throw new Error('bad vlq char');
+            cont = d & 32;
+            v += (d & 31) << shift;
+            shift += 5;
+          }
+          const neg = v & 1;
+          v >>= 1;
+          return neg ? -v : v;
+        };
+        genCol += nextVal();
+        if (i >= str.length) { segs.push({ genCol: genCol }); continue; }
+        srcIdx += nextVal();
+        srcLine += nextVal();
+        srcCol += nextVal();
+        const seg: any = { genCol: genCol, srcIdx: srcIdx, srcLine: srcLine, srcCol: srcCol };
+        if (i < str.length) { nameIdx += nextVal(); seg.nameIdx = nameIdx; }
+        segs.push(seg);
+      }
+    }
+    out.push(segs);
+  }
+  return out;
+}
+
+// 把绝对坐标段数组编码回 mappings 字符串
+function encodeMappings(lines: any[][]): string {
+  let prevSrcIdx = 0, prevSrcLine = 0, prevSrcCol = 0, prevNameIdx = 0;
+  const out: string[] = [];
+  for (let li = 0; li < lines.length; li++) {
+    const parts: string[] = [];
+    for (let si = 0; si < lines[li].length; si++) {
+      const seg = lines[li][si];
+      const prevGenCol = si === 0 ? 0 : lines[li][si - 1].genCol;
+      let s = vlqEncode(seg.genCol - prevGenCol);
+      if (seg.srcIdx !== undefined) {
+        s += vlqEncode(seg.srcIdx - prevSrcIdx); prevSrcIdx = seg.srcIdx;
+        s += vlqEncode(seg.srcLine - prevSrcLine); prevSrcLine = seg.srcLine;
+        s += vlqEncode(seg.srcCol - prevSrcCol); prevSrcCol = seg.srcCol;
+        if (seg.nameIdx !== undefined) { s += vlqEncode(seg.nameIdx - prevNameIdx); prevNameIdx = seg.nameIdx; }
+      }
+      parts.push(s);
+    }
+    out.push(parts.join(','));
+  }
+  return out.join(';');
+}
+
+/**
+ * 合并 script 块与 template 块的 sourcemap 为一张覆盖整个最终模块的 map。
+ * 两块在最终 js 中均为原文拼接：块内生成行 + 块起始行 = 最终模块行；
+ * template map 是模板局部坐标（sourcesContent 为模板片段），先按 srcLineShift
+ * 平移到 .vue 全文件坐标。sources/names 去重合并，sourcesContent 统一回填 .vue 原文。
+ */
+function mergeBlockMaps(scriptMap: any, templateMap: any, templateLineOffset: number, templateLineShift: number, originalSource: string): any | null {
+  const parts: any[] = [];
+  if (scriptMap && scriptMap.mappings) parts.push({ start: 0, srcLineShift: 0, map: scriptMap });
+  if (templateMap && templateMap.mappings) parts.push({ start: templateLineOffset, srcLineShift: templateLineShift, map: templateMap });
+  if (parts.length === 0) return null;
+  const sources: string[] = [];
+  const names: string[] = [];
+  const indexOfIn = (arr: string[], s: string) => {
+    for (let i = 0; i < arr.length; i++) if (arr[i] === s) return i;
+    arr.push(s);
+    return arr.length - 1;
+  };
+  const decodedParts: any[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const pSources = p.map.sources || [];
+    const pNames = p.map.names || [];
+    const srcMap: any = {};
+    for (let k = 0; k < pSources.length; k++) {
+      // 先规范化再去重，两个块指向同一 .vue 时合并为一条 source
+      const s = String(pSources[k]);
+      const v = s.indexOf('webpack://') === 0 ? s : 'webpack://easy-vue/' + s.replace(/^\/?/, '');
+      srcMap[k] = indexOfIn(sources, v);
+    }
+    const nameMap: any = {};
+    for (let k = 0; k < pNames.length; k++) nameMap[k] = indexOfIn(names, String(pNames[k]));
+    decodedParts.push({ start: p.start, srcLineShift: p.srcLineShift, dec: decodeMappings(p.map), srcMap: srcMap, nameMap: nameMap });
+  }
+  decodedParts.sort((a, b) => a.start - b.start);
+  const mergedLines: any[][] = [];
+  let emitted = -1;
+  for (let pi = 0; pi < decodedParts.length; pi++) {
+    const p = decodedParts[pi];
+    for (let genLine = 0; genLine < p.dec.length; genLine++) {
+      const target = p.start + genLine;
+      if (target <= emitted) continue;   // 块行区间重叠时跳过后者（正常布局不会发生）
+      while (emitted < target - 1) { mergedLines.push([]); emitted++; }
+      const segs: any[] = [];
+      const segsSrc = p.dec[genLine];
+      for (let si = 0; si < segsSrc.length; si++) {
+        const seg = segsSrc[si];
+        if (seg.srcIdx === undefined) { segs.push({ genCol: seg.genCol }); continue; }
+        const mapped: any = { genCol: seg.genCol, srcIdx: p.srcMap[seg.srcIdx], srcLine: seg.srcLine + p.srcLineShift, srcCol: seg.srcCol };
+        if (seg.nameIdx !== undefined) mapped.nameIdx = p.nameMap[seg.nameIdx];
+        segs.push(mapped);
+      }
+      mergedLines.push(segs);
+      emitted = target;
+    }
+  }
+  const merged: any = { version: 3, file: 'ev-final.js', sources: sources, names: names, mappings: encodeMappings(mergedLines) };
+  normalizeMapSources(merged);
+  if (sources.length > 0) merged.sourcesContent = merged.sources.map(() => originalSource);
+  return merged;
 }
 
 // 解析 <style module> / <style module="m1"> 的模块名（无名字返回空串=默认 $style）
@@ -213,7 +362,7 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
 
   // 2. script / script setup
   let js = '';
-  let scriptMap: any = null;
+  let scriptMap: any = null;   // script 块 map（生成行 == 最终模块行），最后与 template map 合并
   let sfcBindings: any = null;
   if (d.scriptSetup || d.script) {
     const s = compileScript(d, { id: 'ev' });
@@ -251,10 +400,11 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
     const scriptEl: any = d.scriptSetup || d.script;
     const scriptLang = scriptEl ? scriptEl.lang : null;
     if (scriptLang === 'ts' || scriptLang === 'tsx') {
-      js += transpileScriptTs(code, filename, wantMap ? scriptMap : null);
+      const ts = transpileScriptTs(code, filename, wantMap ? scriptMap : null);
+      js += ts.code + '\n';
+      if (wantMap && ts.map) scriptMap = ts.map;   // esbuild 产物行 == 模块行，map 直接可用
     } else {
-      js += code + '\n';
-      if (wantMap && scriptMap) js += inlineMapComment(normalizeMapSources(scriptMap));
+      js += code + '\n';   // script map 坐标即模块行（sourcemap 模式无头部注释），留待合并
     }
   } else {
     js += 'const __sfc__ = {}\n';
@@ -272,15 +422,37 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
   if (sfcBindings) {
     templateOptions.compilerOptions = { bindingMetadata: sfcBindings as any };
   }
+  let templateMap: any = null;
+  let templateLineOffset = 0;   // render 代码在最终 js 里的起始行（0 基）
+  let templateLineShift = 0;    // template map 局部坐标 → .vue 全文件坐标的行偏移
   if (d.template) {
+    // 此前 js 必以 \n 结尾，render 代码从新的一行开始
+    templateLineOffset = js.split('\n').length - 1;
     const r = compileTemplate(templateOptions);
     if (r.errors && r.errors.length > 0) {
       throw new Error('template errors: ' + JSON.stringify(r.errors));
     }
     js += r.code + '\n';
     js += '__sfc__.render = render;\n';
+    // template map 是模板局部坐标（sourcesContent 为模板片段）：
+    // 偏移 = <template> 标签（1 基）所在行，即模板内容首行的 0 基行号
+    if (wantMap && r.map) {
+      templateMap = r.map;
+      templateLineShift = d.template.loc.start.line - 1;
+    }
   }
   js += 'export default __sfc__;\n';
+
+  // 合并 script/template 两块 map 为一张，置于文件最后一行（规范要求 sourceMappingURL 在末行）
+  if (wantMap) {
+    let merged: any = null;
+    try {
+      merged = mergeBlockMaps(scriptMap, templateMap, templateLineOffset, templateLineShift, source);
+    } catch (e) {
+      merged = scriptMap ? normalizeMapSources(scriptMap) : null;   // 合并失败退回仅 script 的 map
+    }
+    if (merged) js += inlineMapComment(merged);
+  }
 
   const css = cssParts.join('\n');
   return { js, css };
@@ -421,7 +593,7 @@ function convert() {
 
 function usage() {
   process.stdout.write('usage: easy-vue serve [host:]port | convert | --version\n' +
-    '  serve      HTTP 常驻（必须指定端口，如 0.0.0.0:9000；或设 SF_HOST/SF_PORT），POST /compile\n' +
+    '  serve      HTTP 常驻（必须指定端口，如 0.0.0.0:9000），POST /compile\n' +
     '  convert    stdin 读一行 JSON 编译后写一行输出即退出\n' +
     '  --version  打印版本后退出\n');
 }
