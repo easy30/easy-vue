@@ -21,33 +21,12 @@ import { join } from 'node:path';
 import { parse, compileScript, compileTemplate, compileStyle } from '@vue/compiler-sfc';
 import remapping from '@ampproject/remapping';
 import { EASY_VUE_VERSION } from './version';
+import { resolveEsbuild } from './esbuild-bin';
+import { runDeps } from './deps';
 
 const BUF = Buffer.alloc(1);
 
-/**
- * 定位 esbuild 可执行文件（.ts / <script lang=ts> / @api 转译用）。
- * 优先级：
- *   1. 二进制自身同目录下的 esbuild（zip 随 easy-vue 一起分发的场景，esbuild 与该
- *      二进制放在同一目录即可，免任何环境变量）
- *   2. PATH 里的裸命令 esbuild（兜底）
- * process.argv[1] 在 scriptc 原生产物里是「二进制自身路径」（绝对或相对 cwd），
- * 由此可推导同目录布局。
- */
-function resolveEsbuild(): string {
-  const self = process.argv[1] as any as string;
-  if (self) {
-    const slash = self.lastIndexOf('/');
-    // argv[1] 可能是 '/abs/easy-vue'、'./easy-vue'、'easy-vue'
-    const dir = slash >= 0 ? self.substring(0, slash) : '.';
-    const dirExe = slash >= 0 ? dir + '/esbuild' : 'esbuild';
-    try {
-      if (existsSync(dirExe)) return dirExe;
-    } catch (e) {
-      // 忽略 stat 失败，继续回退
-    }
-  }
-  return 'esbuild';
-}
+// esbuild 定位逻辑移至 ./esbuild-bin（serve 与 deps 共用）
 const ESBUILD = resolveEsbuild();
 
 // UTF-8 → base64：用 scriptc 原生 Buffer 支持
@@ -325,24 +304,33 @@ function moduleNameOf(attrs: any): string {
  * 编译单个 .vue 源码 → {js, css}（同步）。
  * CSS module 类名哈希在 CSS 与模板中保持一致。
  */
-function compileVue(source: string, filename: string, wantMap: boolean): { js: string; css: string } {
+function compileVue(source: string, filename: string, wantMap: boolean, styleInject: boolean): { js: string; css: string } {
   const parsed = parse(source, { filename });
   if (parsed.errors && parsed.errors.length > 0) {
     throw new Error('parse errors: ' + JSON.stringify(parsed.errors));
   }
   const d: any = parsed.descriptor;
+  // 文件级统一 scope id（官方语义，所有 style 块共用，不含块序号）：
+  // compileStyle 产 [data-v-x] 选择器、compileTemplate 给 VNode 加 scopeId（由 id 内部拼 data-v- 前缀）、
+  // compileScript 定 v-bind CSS 变量前缀——三侧必须同 id，否则 scoped/v-bind 静默失效
+  const scopeShort = cssHash(filename, 'ev');
+  const scopeId = 'data-v-' + scopeShort;
 
   // 1. 样式处理 + css module 映射
   const cssModules: any = {};
   const cssParts: string[] = [];
   const usedModuleNames = new Set<string>();
+  // 对齐官方（plugin-vue template.ts）：任意块带 scoped 即算（module+scoped 同块也算）；
+  // compileStyle 的 scoped 按块属性原样传（官方 style.ts），module 块的 scoped 不吞
+  let hasScoped = false;
   if (d.styles) {
     for (let i = 0; i < d.styles.length; i++) {
       const st = d.styles[i];
       const attrs = st.attrs;
       const isModule = Boolean(attrs.module);
       const scoped = Boolean(attrs.scoped);
-      const r = compileStyle({ source: st.content, filename, id: 'ev-' + i, scoped: !isModule && scoped });
+      if (scoped) hasScoped = true;
+      const r = compileStyle({ source: st.content, filename, id: scopeShort, scoped });
       if (r.errors && r.errors.length > 0) {
         throw new Error('style errors: ' + JSON.stringify(r.errors));
       }
@@ -365,7 +353,7 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
   let scriptMap: any = null;   // script 块 map（生成行 == 最终模块行），最后与 template map 合并
   let sfcBindings: any = null;
   if (d.scriptSetup || d.script) {
-    const s = compileScript(d, { id: 'ev' });
+    const s = compileScript(d, { id: scopeShort });
     if (s.bindings) sfcBindings = s.bindings;
     // 把 default 导出捕获为局部变量 __sfc__，随后把模板 render 挂到它上面再导出
     let code = s.content.replace(/export default/, 'const __sfc__ =');
@@ -418,7 +406,7 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
   // 4. template（cssModules 使模板 $style.X / m1.X 被解析成 _ctx 引用），并挂到组件对象上。
   //    绑定 metadata（script setup 的导入/局部绑定）传下去，模板里的 <Foo/> 才能直接引用
   //    $setup["Foo"]，而不是退化为 _resolveComponent("Foo")（运行时依赖全局组件注册，会白屏）。
-  const templateOptions: any = { source: d.template.content, filename, id: 'ev', cssModules };
+  const templateOptions: any = { source: d.template.content, filename, id: scopeShort, scoped: hasScoped, slotted: Boolean(d.slotted) };
   if (sfcBindings) {
     templateOptions.compilerOptions = { bindingMetadata: sfcBindings as any };
   }
@@ -441,7 +429,23 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
       templateLineShift = d.template.loc.start.line - 1;
     }
   }
+  // scoped：给组件对象挂 __scopeId（Vue 3.5 机制：runtime 在 setCurrentRenderingInstance
+  // 时读 instance.type.__scopeId 挂到每个 vnode，与 compileStyle 产的 [data-v-x] 选择器匹配；
+  // 参照 plugin-vue main.ts 的 attachedProps 做法，compiler 不产此字段，集成方必须自己加）
+  if (hasScoped) js += '__sfc__.__scopeId = ' + JSON.stringify(scopeId) + '\n';
+  // css module：挂 __cssModules（plugin-vue 同款），script setup 里 useCssModule() /
+  // useCssModule('名') 走 runtime 这条路；默认模块键必须是 '$style'（runtime 缺省取它）
+  if (usedModuleNames.size > 0) {
+    const m: any = {};
+    for (const name of usedModuleNames) m[name === '' ? '$style' : name] = cssModules[name] || {};
+    js += '__sfc__.__cssModules = ' + JSON.stringify(m) + '\n';
+  }
   js += 'export default __sfc__;\n';
+
+  // style:"inject"：CSS 以幂等注入脚本编进 js。必须先于 sourcemap 拼接，
+  // 保证 sourceMappingURL 注释保持在文件末行（规范要求）；空样式不加脚本。
+  // css 字段照旧返回，供想要独立 .css 文件的调用方使用（注入脚本幂等，两者不冲突）。
+  if (styleInject && cssParts.length > 0) js += styleInjectScript(cssParts.join('\n'), filename);
 
   // 合并 script/template 两块 map 为一张，置于文件最后一行（规范要求 sourceMappingURL 在末行）
   if (wantMap) {
@@ -456,6 +460,20 @@ function compileVue(source: string, filename: string, wantMap: boolean): { js: s
 
   const css = cssParts.join('\n');
   return { js, css };
+}
+
+// 生成样式注入脚本：SSR 安全 + 按组件幂等（同一组件重复加载只更新不重复插标签）。
+// scriptc 限制：不用模板字符串/replace(fn)/g 正则，拼接与清洗用 concat 与字符循环。
+function styleInjectScript(css: string, filename: string): string {
+  // 组件标识：文件名 hash（8 位 hex）作 style 标签幂等键。
+  // 不用清洗文本：①清洗可产生空键/撞键（'a/b.vue' 与 'a-b-vue' 同为 a-b-vue，样式互相覆盖）；
+  // ②filename='style.vue' 时清洗键 data-ev-style 会与枚举标记属性同名互相覆盖。
+  const attr = 'data-ev-' + cssHash(filename, 'ev-style');
+  // CSS 嵌入为合法 JS 字符串字面量；< 转义为 \u003c（防 </script> 类序列）
+  const cssLit = JSON.stringify(css).split('<').join('\\u003c');
+  // 注入样板取压缩形态：每个 vue 产物都会带一份，可读性让位于体积
+  let code = '\n;(function(){if(typeof document=="undefined")return;var c=' + cssLit + ',a="' + attr + '",s=document.querySelector("style["+a+"]"),t=document.querySelectorAll("style[data-ev-style]"),i;for(i=0;i<t.length;i++)if(t[i].textContent===c)return;if(s){s.textContent=c;return}s=document.createElement("style");s.setAttribute("data-ev-style","");s.setAttribute(a,"");s.textContent=c;document.head.appendChild(s)})();\n';
+  return code;
 }
 
 // 重写 css 中的 .class 选择器为哈希类名，并填充映射
@@ -491,13 +509,14 @@ function rewriteCssModuleClasses(css: string, moduleName: string, hashFn: (n: st
   return out;
 }
 
-interface Req { id?: number; type?: string; source?: string; filename?: string; sourcemap?: boolean; }
+interface Req { id?: number; type?: string; source?: string; filename?: string; sourcemap?: boolean; style?: string; }
 interface Resp { id: number | null; ok: boolean; js?: string; css?: string; error?: string; }
 
 function handleReq(line: string, allowRead: boolean): string {
   const req: Req = JSON.parse(line);
   const id: number | null = req.id === undefined ? null : req.id;
   const wantMap = !!req.sourcemap;
+  const styleInject = req.style !== 'separate';   // 缺省注入（新项目无需兼容旧分字段）；显式 "separate" 走 css 分字段
   let type = req.type || (req.filename || '').split('.').pop() || 'js';
 
   let source = req.source;
@@ -514,8 +533,11 @@ function handleReq(line: string, allowRead: boolean): string {
   const filename = req.filename || 'inline.' + type;
 
   if (type === 'vue') {
-    const out = compileVue(source, filename, wantMap);
-    return JSON.stringify({ id, ok: true, js: out.js, css: out.css } as Resp);
+    const out = compileVue(source, filename, wantMap, styleInject);
+    // 注入模式样式已在 js 内，响应省略 css 字段（避免双份传输）；需要独立 css 文件的调用方用 "style":"separate"
+    const resp: Resp = { id, ok: true, js: out.js };
+    if (!styleInject) resp.css = out.css;
+    return JSON.stringify(resp);
   } else if (type === 'ts' || type === 'jsx' || type === 'tsx') {
     const js = esbuildInline(source, 'ts', filename);
     return JSON.stringify({ id, ok: true, js } as Resp);
@@ -592,9 +614,10 @@ function convert() {
 }
 
 function usage() {
-  process.stdout.write('usage: easy-vue serve [host:]port | convert | --version\n' +
+  process.stdout.write('usage: easy-vue serve [host:]port | convert | deps -c <config.json> | --version\n' +
     '  serve      HTTP 常驻（必须指定端口，如 0.0.0.0:9000），POST /compile\n' +
     '  convert    stdin 读一行 JSON 编译后写一行输出即退出\n' +
+    '  deps       依赖摇树：扫描源码 → 生成 entry → esbuild --bundle → 产物 js/css + meta.json\n' +
     '  --version  打印版本后退出\n');
 }
 
@@ -607,6 +630,18 @@ function main() {
     return;
   }
   if (argv.indexOf('convert') >= 0) { convert(); return; }
+  const di = argv.indexOf('deps');
+  if (di >= 0) {
+    const ci = argv.indexOf('-c');
+    const configPath = ci >= 0 && argv[ci + 1] ? argv[ci + 1] : null;
+    if (!configPath) {
+      process.stderr.write('[easy-vue deps] 缺少配置: easy-vue deps -c <config.json> [--force]\n');
+      usage();
+      process.exit(1);
+    }
+    process.exit(runDeps(configPath, argv.indexOf('--force') >= 0));
+    return;
+  }
   if (argv.indexOf('--version') >= 0 || argv.indexOf('version') >= 0) {
     process.stdout.write('easy-vue ' + EASY_VUE_VERSION + '\n');
     return;

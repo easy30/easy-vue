@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+<head>
+<title>easy-vue 最简演示</title>
+<meta charset="utf-8">
+<!-- vue 走 CDN importmap；产品里可换本地 vendor 文件（见 ../python/） -->
+<script type="importmap">{"imports":{"vue":"https://unpkg.com/vue@3.5.31/dist/vue.esm-browser.prod.js"}}</script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createApp } from 'vue';
+import Home from '/views/home.vue';   /* ← 后端现场把 .vue 编译成 ESM JS */
+createApp(Home).mount('#app');
+</script>
+</body>
+</html>

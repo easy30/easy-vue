@@ -1,51 +1,67 @@
 # easy-vue（开发 / 构建指南）
 
-> 使用指南见 **[README.md](./README.md)**（如何启动 HTTP、如何调用）。本文件记录开发、编译、交叉构建、水平扩展等实现细节。
+> 使用指南见 **[README.md](./README.md)**（如何启动、如何调用、deps 配置）。本文件记录 easy-vue 本身的开发、编译、实现细节与踩坑排查。
 
-由 **scriptc**（TS/JS → 原生 C 编译器）编译而成；`.vue` 用 `@vue/compiler-sfc`，`.ts`/`@api` 用 esbuild（Go 二进制，随包分发，经 `child_process` 调用）。
+由 **scriptc**（TS/JS → 原生 C 编译器）编译而成；`.vue` 用 `@vue/compiler-sfc`，`.ts`/`@api` 与 `deps` 摇树用 esbuild（Go 二进制，随包分发，经 `child_process` 调用）。
 
 ---
 
-## 目录结构
+## 一、目录结构
 
 ```
 easy-vue/
-├── src/serve.ts            # 程序入口（stdin/stdout JSON 常驻协议）
-├── bin/                  # 全部编译产物集中于此（exe / 中间 .c / pdb，均可再生成）
-├── win/                  # Windows 交叉编译 shim + wrapper + 一键脚本
-├── node_modules/         # 依赖：@vue/compiler-sfc、esbuild、scriptc@0.0.33
-├── api-demo.ts          # 测试样例（含 @api 装饰器）
-└── demo.vue            # 测试样例
+├── src/
+│   ├── serve.ts           # 程序入口：serve / convert / deps / --version 模式分发
+│   ├── deps.ts            # deps 依赖摇树流水线（配置→扫描→entry→esbuild→产物+缓存）
+│   ├── esbuild-bin.ts     # esbuild 可执行文件定位（serve 与 deps 共用）
+│   ├── version.ts         # 由 VERSION 生成（scripts/gen-version.sh），勿手改
+│   ├── esbuild_cli.ts     # 测试脚本：验证 child_process 调 esbuild 的通路
+│   └── stub.ts            # 测试脚本：验证 esbuild transformSync 通路
+├── bin/                   # 全部编译产物集中于此（exe / 中间 .c，均可再生成）
+├── win/                   # Windows 交叉编译 shim + wrapper + 一键脚本
+├── scripts/gen-version.sh # 构建前从 VERSION 生成 src/version.ts
+├── node_modules/          # 依赖：@vue/compiler-sfc、esbuild、scriptc@0.0.33（固定）
+├── demo/                  # 集成演示：python-minimal（最简）/ python（FastAPI 完整版）
+├── api-demo.ts            # 测试样例（含 @api 装饰器）
+└── demo.vue               # 测试样例
 ```
 
 ---
 
-## 一、程序入口
+## 二、模块说明
 
-入口是 `src/serve.ts`，编译为**免 Node 原生二进制**，两种模式由参数区分：
+### 入口 `src/serve.ts`
 
-- **`serve [host:]port`** — **HTTP 常驻**服务：**必须显式指定端口**（无默认，避免冲突），`POST /compile` 编译并返回 JSON。缺省绑定 `127.0.0.1`（仅本机，安全）；远程访问须 `0.0.0.0:port`。**调用方用标准 HTTP client（可并发、可设超时、可中断），无管道僵死风险**。
-- **`convert`** — **一次性**：从 stdin 读一行请求 JSON → 编译 → 写一行响应 JSON → **退出**（不常驻）。适合单次调用；多次调用建议用 `serve`（避免反复起进程）。
-- **`--version` / `version`** — 打印内置版本号后退出（如 `easy-vue v1.2.0`），用于确认二进制版本。
+模式由参数区分：
 
-```
-easy-vue serve 127.0.0.1:9000   # 本机，显式端口
-easy-vue serve 0.0.0.0:9000     # 远程访问
-easy-vue convert           # 一次性 stdin→stdout
-easy-vue --version         # 打印版本
-```
+- **`serve [host:]port`** — HTTP 常驻（必须显式端口，缺省绑 127.0.0.1）；`POST /compile`。serve 模式**绝不读服务器本地文件**（安全模型：只接受 source）。
+- **`convert`** — 一次性 stdin→stdout 即退出；本地可信模式，允许按 filename 读文件。
+- **`deps -c <配置.json> [--force]`** — 依赖摇树（见「四、deps 实现要点」）；本地可信模式，读配置指定的本地路径。
+- **`--version` / `version`** — 打印版本（版本号唯一出处是仓库根 `VERSION`，构建时经 `scripts/gen-version.sh` 注入 `src/version.ts`）。
 
-**无状态**：每次请求都重新编译，不缓存（缓存策略由调用方决定，如 Java 的 `VueCache`）。
+**无状态**：编译请求不缓存（缓存策略由调用方决定）。
 
-**版本号**：唯一事实来源是仓库根目录 `VERSION`（统一 v 前缀）。构建前用 `scripts/gen-version.sh` 从 `VERSION` 生成 `src/version.ts` 注入二进制（见「二、编译」）。
+**样式注入**：vue 请求**缺省即注入**（`"style":"separate"` 显式关闭）：`.vue` 的 `<style>` 编译结果以幂等 IIFE 编进 js 尾部（注入位置在 sourcemap 注释**之前**，保证 `sourceMappingURL` 仍在末行），响应**不含** css 字段（避免双份传输）；`separate` 模式样式走响应 `css` 字段（供独立 .css 文件场景）。注入脚本双保险：①按文件 hash 键（`data-ev-<hash>`）幂等更新，同组件样式变更不叠标签；②内容级查重（所有注入标签带统一标记属性 `data-ev-style`，页面上已有相同 CSS 内容直接跳过——不同组件带相同全局样式块也只留一份）。注意属性选择器不能写 `style[data-ev-]`（连字符结尾非法，querySelectorAll 会抛 SyntaxError），必须用 `data-ev-style`。
+
+**scoped 的三侧一致性（踩过的坑）**：Vue 3.5 的 scopeId 机制是「组件对象挂 `__scopeId`，runtime 渲染时经 `setCurrentRenderingInstance` 读 `instance.type.__scopeId` 再挂到每个 vnode」——**compiler 不产任何 pushScopeId 代码，`__scopeId` 由集成方自己追加**（参照 plugin-vue `attachedProps` 做法）。因此 `compileVue`：
+1. 用文件名 hash 生成**文件级** `scopeShort`（所有 style 块共用，不带块序号）；
+2. `compileStyle({ id: scopeShort })` 产 `[data-v-<hash>]` 选择器；
+3. `compileTemplate({ id: scopeShort, scoped: hasScoped })`；
+4. `compileScript({ id: scopeShort })`（v-bind CSS 变量前缀 `--<hash>-x` 与 CSS 侧一致）；
+5. **有 scoped 块时给产物追加 `__sfc__.__scopeId = "data-v-<hash>"`**。
+任何一侧 id 不一致（例如旧版用 `ev-<i>` 带块序号、或漏挂 `__scopeId`），scoped 样式都会**静默失效**——没有报错，只能靠运行时验证发现。
+
+### esbuild 定位 `src/esbuild-bin.ts`
+
+优先级：`ESBUILD_BINARY_PATH` 环境变量 → 二进制同目录的 `esbuild`（zip 分发即此布局，`process.argv[1]` 推导）→ PATH 兜底。
 
 ---
 
-## 二、编译
+## 三、编译
 
 ### 前置
 - **Node ≥ 20**（仅编译期需要；产物运行不需要 Node）
-- **scriptc 0.0.33**（本项目已固定到 `node_modules/.bin/scriptc`；⚠️ 勿用 `npx scriptc` 免安装——会拉 0.0.34 有回归）
+- **scriptc 0.0.33**（已固定在 `node_modules/.bin/scriptc`；⚠️ 勿用 `npx scriptc` 免安装——会拉 0.0.34 有回归）
 - **Zig 0.13.0**（本机原生 macOS 不需要；交叉编译其它平台需，https://ziglang.org/download/，解压后 `export PATH=/.../zig-0.13.0:$PATH`）
 - **cmake**（本机原生 macOS **必需**——`--dynamic` 首次要配置/编译内嵌 quickjs 引擎；可用 portable 版，见 `mac-local-build.md`；引擎编译产物会缓存，之后不再需要）
 
@@ -59,7 +75,7 @@ node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-v
 
 ### 各平台 × 64 位架构（32 位不编）
 
-本机为 macOS x86_64，其它平台/架构用 zig 交叉编译（`zig cc` 当后端）。**全部产物统一输出到 `bin/`**。已产出的 6 个 64 位交叉编译产物（另有本机原生 `easy-vue-bin`，见上文「macOS 本机原生」）：
+本机为 macOS x86_64，其它平台/架构用 zig 交叉编译（`zig cc` 当后端）。**全部产物统一输出到 `bin/`**：
 
 | 产物（均在 `bin/`） | 平台 × 架构 | 大小 | 命令（`SCRIPTC_CC=zigcc` + `SCRIPTC_TARGET`） |
 |---|---|---|---|
@@ -67,7 +83,7 @@ node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-v
 | `easy-vue-mac-intel` | macOS x86_64（Intel）| ~2.0 MB | `x86_64-macos` |
 | `easy-vue-linux` | Linux x86_64 | ~4.9 MB | `x86_64-linux-musl`（纯静态）|
 | `easy-vue-linux-arm64` | Linux arm64 | ~5.6 MB | `aarch64-linux-musl` |
-| `easy-vue-win-x64.exe` | Windows x86_64 | ~2.3 MB | `win/build-win.sh x64`（见 Windows 段落）|
+| `easy-vue-win-x64.exe` | Windows x86_64 | ~2.3 MB | `win/build-win.sh x64`（见下）|
 | `easy-vue-win-arm64.exe` | Windows arm64 | ~2.1 MB | `win/build-win.sh arm64` |
 
 ```bash
@@ -96,106 +112,24 @@ SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-musl node_modules/.bin/scriptc bui
 > ```
 > 或把 `esbuild.exe` 放在 exe 同目录即可。
 
-### 运行时配套 esbuild
-`easy-vue` 运行时通过 **`ESBUILD_BINARY_PATH`** 环境变量（或同名目录下的 `esbuild`）定位 esbuild Go 二进制做 `.ts`/`@api` 转换。分发时带上对应平台的 esbuild 二进制：
-```bash
-export ESBUILD_BINARY_PATH=/absolute/path/to/esbuild   # 启动前设置
-```
+---
+
+## 四、deps 实现要点（src/deps.ts）
+
+流水线：**读配置 → 扫描源码 → 生成 entry → esbuild --bundle → 原子写产物 + meta.json**。
+
+- **扫描**：递归 `scan.roots`（按扩展名过滤），两类名字取并集——① 模板标签 `<el-xxx>`（经 `componentPrefix` 前缀匹配，Pascal 化成组件名）；② `import { ElXxx } from '<name>'` 具名导入（支持多行与 `as`，取原始名）。再套 `ignore` 剔除。纯字符串 `split` 实现（scriptc 不支持带 `/g` 的 regex 匹配，见「六、踩坑」）。
+- **entry 生成**：
+  - `deep`（组件库）：每个名字一条深路径 import，同目录合并；目录取 `mappings[name]`，缺省推导 = 剥掉 `El` 前缀后 kebab 化；模块不存在 → 整体报错并列缺失名单（提示「补 mappings 或 ignore」），不静默漏摇。样式按目录去重聚合（`styleTemplate` 命中 `css.mjs`，其内部引 theme-chalk 的 .css，esbuild 提取为独立 CSS）。`default` 导出 install 插件，只注册模板标签里出现的名字；具名导出覆盖全部名单。entry 写入 `mkdtemp` 临时目录，**import 一律绝对路径**（esbuild 按入口文件位置解析相对路径）。
+  - `root`（普通 ESM 库）：从包根入口（package.json 的 module > main > index.mjs > index.js）导入扫描到的具名导入。
+- **esbuild 调用**：`--bundle --format=esm --platform=browser`，`define` 固定 `process.env.NODE_ENV="production"`；产物 CSS 是 **outfile 的兄弟文件 `out.css`**（不是 `out.js.css`）。
+- **原子写**：产物先写 `<file>.tmp-<rand>` 再 `renameSync`，防并发读半截文件；meta.json 同样原子替换。
+- **缓存**：`listHash = sha256(...).substring(0,16)`，输入为排序名单 + dep 配置（含 mappings/ignore/esbuild 选项）+ 包版本（packageRoot/package.json）。命中条件：meta.json 中同名记录 listHash 一致 **且** 两份产物文件存在 → 跳过 esbuild（扫描照常）。`--force` 绕过。
+- **失败契约**：stdout 一行结果 JSON（`{"ok":true,"results":{...}}`），日志走 stderr；任一 dep 失败即停止后续 dep，exit 1。调用方（如 Maven/CI）以 exit code + ok 字段决定是否采用产物。
 
 ---
 
-## 三、调用协议
-
-## 三、调用协议
-
-### 请求体（HTTP `POST /compile` body；`convert` 则把该 JSON 作为 stdin 一行）
-
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `id` | number | 请求 id（可选），成功时随响应回显 |
-| `type` | string | `vue` / `ts` / `js`；缺省按 `filename` 扩展名推断 |
-| `source` | string | 源码内容（优先） |
-| `filename` | string | 文件名/路径：用作编译时的名字（`__name` / sourcemap / type 推断），有 `source` 时必须带。**serve(HTTP) 模式只允许这种方式**，绝不按 filename 读服务器本地文件（避免任意文件读取泄露）；仅本地可信的 `convert` 模式允许无 `source` 时按 filename 读文件（该文件需可读） |
-| `sourcemap` | boolean | `true` 时产出内联 sourcemap（默认不产） |
-
-### 响应（JSON）
-
-| 字段 | 说明 |
-|---|---|
-| `id` | 回显（失败时 `null`） |
-| `ok` | 是否成功 |
-| `js` | 编译后 JS（尾部可带内联 sourcemap 注释） |
-| `css` | `.vue` 的 `<style>` 编译结果（仅 vue 且有样式时） |
-| `error` | 失败信息（`ok=false` 时） |
-
-### 一次性 convert 例子
-
-```bash
-echo '{"type":"vue","source":"<template><div>{{n}}</div></template>\\n<script setup>\\nconst n=ref(1)\\n</script>","filename":"views/hello.vue"}' | ./bin/easy-vue-bin convert
-# → {"id":null,"ok":true,"js":"...","css":""}
-```
-
-错误（文件不存在）：`echo '{"filename":"/no/such.vue"}' | ./bin/easy-vue-bin convert` → `{"ok":false,"error":"file not found: /no/such.vue"}`
-
-### HTTP 常驻调用（推荐，多后端/多次复用）
-
-```bash
-./bin/easy-vue-bin serve &            # 127.0.0.1:9000
-curl -s -XPOST 127.0.0.1:9000/compile \
-  -d '{"type":"ts","source":"const n: number=1; export default n;"}'
-# → {"id":null,"ok":true,"js":"const n = 1;\\n..."}
-```
-
-HTTP 模式天然支持并发、可设连接/读超时、可中断 —— 调用方无僵尸风险。Java 用 easy-vue4j 的 `EasyVueHttpClient`。
-
----
-
-## 四、sourcemap 说明
-
-- `.ts` → esbuild `--sourcemap=inline`（base64 data URI，`sources: ['<stdin>']`）
-- `.vue` → **只映射 `<script>` / `<script setup>` 段**（template/css 不出 map），`sourcesContent` 含完整 .vue 源码。base64 内联进 js 尾部，浏览器 devtools 可直接读 script 源码、断点定位。
-- sourcemap 已在 js 内联，调用方无需额外处理，原样返回 js 即可。
-
----
-
-## 五、与 easy-vue4j 集成
-
-easy-vue4j（Java 8，零依赖）通过 **`VueCompiler` 抽象接口**对接本工具。参考实现在本仓库 [easy-vue4j（独立项目 github.com/easy30/easy-vue4j）。
-
-### 两种编译实现（配置驱动切换）
-
-| 实现 | 说明 | 何时使用 |
-|---|---|---|
-| `EasyVueHttpClient` | 调 easy-vue 原生二进制（HTTP 常驻），真实编译 vue/ts | 配置的 `easy-vue.path` 存在 |
-| `JavaVueCompiler` | 纯 Java 回退（不依赖二进制） | `easy-vue.path` 未配置/不存在 |
-
-约定：配置项 `easy-vue.path`（或环境变量 `EASY_VUE_PATH`）**指向的二进制存在 → 用 easy-vue**，否则纯 Java。
-
-### EasyVueHttpClient 特性（自定端口 + 指定进程数）
-- **客户端自定端口**：启动前自挑空闲端口传给 easy-vue，天然知端口，无需读 stdout/注册文件。
-- **指定进程数**：`EasyVueHttpClient.start(bin, N)` 自动起 N 个 serve 进程（N 核并行），内部轮询分发。
-- **就绪探测**：启动后逐端口轮询 connect，服务就绪（~几百 ms）才返回。
-- **非阻塞启动 + Java8 兼容**：`ProcessBuilder.start()` 立刻返回，`close()` 统一清理。
-
-### 用法
-
-```java
-// 配置驱动：有 easy-vue 二进制 → easy-vue；否则 → 纯 Java
-VueConfig config = VueConfig.fromSystemProperties();   // -Deasy-vue.path=...
-VueCache cache = VueCache.create(config);
-
-// 编译（带缓存）
-VueCompileResult r = cache.compile(VueCompileRequest.of("vue", source, "hello.vue"));
-```
-
-```java
-// 或直接指定二进制 + 进程数（水平扩展：N 进程 = N 核并行）
-EasyVueHttpClient ef = EasyVueHttpClient.start("/path/to/easy-vue-bin", 4);
-VueCompileResult r = ef.compile(VueCompileRequest.of("vue", source, "a.vue"));
-ef.close();
-```
-
-## 六、水平扩展（多进程）
+## 五、水平扩展（多进程）
 
 单进程 `serve` 已可并发（单请求 vue 编译 ~2.7ms）。若单进程并发不够，需水平扩展到多进程 —— **由客户端自行启动多个 `serve` 端口进程**，easy-vue 本身无需改动（无状态，可随意多开）。
 
@@ -244,6 +178,43 @@ proc = subprocess.Popen(
 
 ---
 
-## 七、易失提醒
-- 本目录如置于 `/tmp` 下重启会丢失；请移到持久目录。
-- scriptc 需固定 **0.0.33**（见上文），避免 0.0.34 的 sourcemap 回归。
+## 六、常见问题与踩坑
+
+### scriptc 0.0.33 编译限制（实测确认，写码前先对照）
+
+| 限制 | 症状 | 解法 |
+|---|---|---|
+| `Object.keys` 无 lowering（SC2020） | 编译报「has no scriptc lowering」 | 名单用 `Set<string>`；分组用「Map 只存标量 + 两遍扫描」；hash 输入直接 `JSON.stringify` |
+| `replace(fn)` 回调不支持（SC1120） | 编译报「replacements must be string templates」 | 字符循环拼接，或 `split`/`join` 处理 |
+| 带 `/g`/`/y` 的 regex 匹配不支持 | **运行时 Abort**：`match() on a regex with the 'g' or 'y' flag is not supported` | 用 `split` 手工扫描（如 deps 的标签/导入扫描） |
+| `string` 返回类型函数不能 `return null` | **运行时** `TypeError: expected string, got object`（`typeof null === 'object'`） | 返回空串哨兵，调用方判真值 |
+| Map 存数组，`get()` 后 `push` 不持久化 | 修改静默丢失（any 边界返回副本） | Map 只存标量；数组放独立 `string[]`，用两遍扫描分组 |
+| any 值参与字符串拼接（SC1090/SC2001） | 编译报「Error messages of type 'any'」「values of type 'unknown'」 | any 值过 `String()`；`JSON.parse` 后的配置一律走 `any` 局部变量 |
+| 宿主对象（如 statSync 的 Stats）存入 any（SC1090） | 编译报「cannot cross the boundary」 | 保持强类型直接用（`const st = statSync(p)` + `st.isDirectory()`） |
+| `process.stderr.write` 参数须是 string（SC2020） | 拼接 any 后报「write of non-string data」 | 先赋给 `const line: string = ...` 再 write |
+| 嵌套 interface 属性访问收窄受限（SC1090） | 读 `cfg.scan.extensions` 报错 | 局部 `const scanAny: any = cfg.scan` 再取字段（同 serve.ts 对请求对象的处理） |
+| 无递归 mkdir | `mkdirSync` 多级目录失败 | 自写 `ensureDir`（逐级 existsSync + mkdirSync） |
+| Date 仅支持只读值 | `new Date().toISOString()` 存疑 | 时间戳用 `Date.now()`（deps 的 meta 即此做法） |
+| 可用性确认 | `node:crypto`（`createHash('sha256').update(s).digest('hex')`）、`mkdtempSync`/`renameSync`/`readdirSync`/`statSync`、`process.cwd()`、Set/Map/RegExp/test、`execFileSync` 均可用 | — |
+
+### esbuild 相关
+- **产物 CSS 文件名**：`--outfile=xxx/out.js` 时 CSS 是兄弟文件 `out.css`，**不是** `out.js.css`——按 `outfile` 去掉 `.js` 后缀再拼 `.css` 找。
+- **组件库根入口摇不动**：element-plus 根入口（es/index.mjs）顶层副作用会让 esbuild 保守保留全部组件，多种补丁（PURE 注释、export 预剪、sideEffects 假包）均无效；必须按深路径逐名导入（deps 的 deep 策略即为此设计）。
+
+### scriptc 版本
+- 固定 **0.0.33**（`node_modules/.bin/scriptc`），勿 `npx scriptc`——0.0.34 有 sourcemap 回归。
+
+### 运行环境
+- **macOS/Linux**：「无执行权限」先 `chmod +x easy-vue`。
+- **Windows**：产物依赖 UCRT，需 Win10/2016+ 或装 VC++ 运行库；esbuild 需对应 win32 平台二进制（`ESBUILD_BINARY_PATH` 或同目录）。
+- **工程位置**：源码工程勿放 `/tmp` 下（重启丢失）。
+- **esbuild 定位**排查顺序：`ESBUILD_BINARY_PATH` → exe 同目录 → PATH；`deps`/`convert`/`serve` 共用同一套定位逻辑（`src/esbuild-bin.ts`）。
+
+---
+
+## 相关文档
+
+- [README.md](./README.md) — 使用指南（启动、调用协议、deps 配置）
+- [RELEASE.md](./RELEASE.md) — 版本发布流程（zip 打包、tag）
+- [mac-local-build.md](./mac-local-build.md) — 本机 portable cmake 环境搭建
+- [todo.md](./todo.md) — 待办
