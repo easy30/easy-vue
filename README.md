@@ -201,5 +201,6 @@ curl -s -XPOST 127.0.0.1:9000/compile -d '{"filename":"/no/such.vue"}'
 - **Python**：两个现成 demo（都不需要写任何编译逻辑，`.vue` 由 easy-vue 现场编译）：
   - [`demo/python-minimal/`](./demo/python-minimal/) — **最简演示**（推荐先看）：仅 3 个文件，Python 标准库零依赖，`python3 main.py` 后浏览器打开 http://127.0.0.1:8800/ 即跑；
   - [`demo/python/`](./demo/python/) — **完整一体化演示**：FastAPI + Uvicorn，复刻 vue4j 的请求过滤语义（mock API / 路由排除 / 编译缓存 / SPA 兜底），`./setup.sh` + `uvicorn main:app` 即跑。
+- **Go**：同样一个现成 demo：[`demo/go-minimal/`](./demo/go-minimal/) — **最简演示**：仅 3 个文件，标准库 `net/http` 零第三方依赖（连 `go.mod` 都不需要），`go run main.go` 后浏览器打开 http://127.0.0.1:8800/ 即跑；easy-vue 作为子进程随它启动、随它退出。
 - **任意后端**：把「启动一个 `serve` 进程 + `POST /compile`」这套协议集成进自己服务即可；多进程水平扩展 = 多开几个 `serve` 端口 + 自己调度（客户端自选端口的具体做法见 [develop.md](./develop.md)「水平扩展」）。
 - **依赖摇树产物**：`deps` 输出到磁盘（`outputDir`），构建期调用（如 Maven/Gradle 插件、CI 脚本），运行时按 importmap 映射或网关替换加载 lite 文件即可；`meta.json` 里的 hash 可直接用作 ETag。

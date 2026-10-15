@@ -21,7 +21,7 @@ easy-vue/
 ├── win/                   # Windows 交叉编译 shim + wrapper + 一键脚本
 ├── scripts/gen-version.sh # 构建前从 VERSION 生成 src/version.ts
 ├── node_modules/          # 依赖：@vue/compiler-sfc、esbuild、scriptc@0.0.33（固定）
-├── demo/                  # 集成演示：python-minimal（最简）/ python（FastAPI 完整版）
+├── demo/                  # 集成演示：python-minimal（最简）/ python（FastAPI 完整版）/ go-minimal（Go 最简）
 ├── api-demo.ts            # 测试样例（含 @api 装饰器）
 └── demo.vue               # 测试样例
 ```
