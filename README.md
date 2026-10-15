@@ -6,6 +6,26 @@
 
 ---
 
+## 30 秒上手
+
+```bash
+# ① 下载并解压(其他平台把文件名换成下方表格对应的 zip)
+curl -LO https://github.com/easy30/easy-vue/releases/latest/download/easy-vue-mac-intel.zip
+unzip easy-vue-mac-intel.zip && chmod +x easy-vue
+
+# ② 起常驻编译服务
+./easy-vue serve 127.0.0.1:9000
+
+# ③ 另开一个终端,现场编译一个 .vue
+curl -s -XPOST 127.0.0.1:9000/compile \
+  -d '{"type":"vue","source":"<template><div>{{n}}</div></template><script setup>const n=1</script>","filename":"a.vue"}'
+# → {"id":null,"ok":true,"js":"// compiled by @vue/compiler-sfc via easy-vue\n..."}
+```
+
+没有 Node、没有 npm install——上面的编译发生在一个原生二进制里。各平台包见下方「一、获取」,接入 Java / Python 直接跳「六、集成到其他服务」。
+
+---
+
 ## 一、获取
 
 ### 方式 A：GitHub Release（推荐，免编译）
