@@ -1,6 +1,6 @@
 # easy-vue（开发 / 构建指南）
 
-> 使用指南见 **[README.md](./README.md)**（如何启动、如何调用、deps 配置）。本文件记录 easy-vue 本身的开发、编译、实现细节与踩坑排查。
+> 使用指南见 **[README.zh.md](./README.zh.md)**（如何启动、如何调用、deps 配置）。本文件记录 easy-vue 本身的开发、编译、实现细节与踩坑排查。
 
 由 **scriptc**（TS/JS → 原生 C 编译器）编译而成；`.vue` 用 `@vue/compiler-sfc`，`.ts`/`@api` 与 `deps` 摇树用 esbuild（Go 二进制，随包分发，经 `child_process` 调用）。
 
@@ -216,7 +216,7 @@ proc = subprocess.Popen(
 
 ## 相关文档
 
-- [README.md](./README.md) — 使用指南（启动、调用协议、deps 配置）
+- [README.zh.md](./README.zh.md) — 使用指南（启动、调用协议、deps 配置）
 - [RELEASE.md](./RELEASE.md) — 版本发布流程（zip 打包、tag）
 - [mac-local-build.md](./mac-local-build.md) — 本机 portable cmake 环境搭建
 - [todo.md](./todo.md) — 待办

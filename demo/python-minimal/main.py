@@ -6,7 +6,7 @@
 
 前置: easy-vue 可执行文件——按优先级找 bin/easy-vue-bin（本目录）、
       ../../bin/easy-vue-bin（仓库构建产物）、PATH 里的 easy-vue。
-      获取方式见仓库 README「一、获取」。
+      获取方式见仓库 README.zh.md「一、获取」。
 
 工作方式:
     浏览器请求 /views/home.vue → 本服务读源码 → 调 easy-vue serve(HTTP /compile)
@@ -34,7 +34,7 @@ def find_easyvue() -> str:
     found = shutil.which("easy-vue")
     if found:
         return found
-    raise SystemExit("找不到 easy-vue 可执行文件：见仓库 README「一、获取」")
+    raise SystemExit("找不到 easy-vue 可执行文件：见仓库 README.zh.md「一、获取」")
 
 
 def compile_vue(source: str, filename: str) -> str:

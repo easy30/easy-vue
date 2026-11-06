@@ -20,7 +20,7 @@ node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-v
 
 - 本机原生编译还需要 **cmake**（首次要配置并编译内嵌 quickjs 引擎，产物会缓存）
 - 交叉编译其它平台需要 **Zig 0.13.0**，各平台命令见 [develop.md](./develop.md) 的「三、编译」
-- 自测：起 `bin/easy-vue-bin serve 127.0.0.1:9000`，用 README「30 秒上手」的 curl 依次验证 `.vue`、`.ts`、内联 sourcemap、`style: "separate"` 四条
+- 自测：起 `bin/easy-vue-bin serve 127.0.0.1:9000`，用 README.zh.md「30 秒上手」的 curl 依次验证 `.vue`、`.ts`、内联 sourcemap、`style: "separate"` 四条
 
 ## 提交 Pull Request
 

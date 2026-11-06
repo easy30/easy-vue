@@ -22,7 +22,7 @@ node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-v
   ```bash
   cp bin/easy-vue-bin bin/easy-vue-mac-intel
   ```
-- 其它平台/架构需交叉编译:用 `zig cc` 当后端并指定 `SCRIPTC_TARGET`(见 README.md「各平台 × 64 位架构」)。
+- 其它平台/架构需交叉编译:用 `zig cc` 当后端并指定 `SCRIPTC_TARGET`(见 README.zh.md「各平台 × 64 位架构」)。
 
 ---
 
@@ -73,7 +73,7 @@ node_modules/.bin/scriptc build src/serve.ts --dynamic --backend c -o bin/easy-v
 ## 四、检查 / 排错
 
 - **产物**:`file bin/easy-vue-bin` 应是 `Mach-O 64-bit executable x86_64`(或 arm64)。
-- **验证编译输出**:`echo '{...vue json...}' | ./bin/easy-vue-bin convert`,参见 README.md「快速验证」。
+- **验证编译输出**:`echo '{...vue json...}' | ./bin/easy-vue-bin convert`,参见 README.zh.md「快速验证」。
 - **cmake 不在 PATH 时的报错**:`--dynamic builds the embedded engine once with CMake, which was not found on PATH. ... Static builds do not need it.`
 - **静态构建报 `SC2013`**:这是正常的——本项目必须 `--dynamic`,不要去掉 `--dynamic`。
 
