@@ -120,3 +120,7 @@ Response: `{"id":…, "ok":true, "js":"…", "css":"…"}`; on failure `{"id":nu
 - [RELEASE.md](RELEASE.md) — tag-driven release pipeline (GitHub Actions + Zig cross-compilation)
 
 MIT licensed.
+
+## Feedback
+
+Questions, bug reports and feature requests: [Discussions](https://github.com/easy30/easy-vue/discussions) · [Issues](https://github.com/easy30/easy-vue/issues).

@@ -205,3 +205,9 @@ curl -s -XPOST 127.0.0.1:9000/compile -d '{"filename":"/no/such.vue"}'
   - [`demo/python/`](./demo/python/) — **完整一体化演示**：FastAPI + Uvicorn，复刻 vue4j 的请求过滤语义（mock API / 路由排除 / 编译缓存 / SPA 兜底），`./setup.sh` + `uvicorn main:app` 即跑。
 - **Go**：同样一个现成 demo：[`demo/go-minimal/`](./demo/go-minimal/) — **最简演示**：仅 3 个文件，标准库 `net/http` 零第三方依赖（连 `go.mod` 都不需要），`go run main.go` 后浏览器打开 http://127.0.0.1:8800/ 即跑；easy-vue 作为子进程随它启动、随它退出。
 - **任意后端**：把「启动一个 `serve` 进程 + `POST /compile`」这套协议集成进自己服务即可；多进程水平扩展 = 多开几个 `serve` 端口 + 自己调度（客户端自选端口的具体做法见 [develop.md](./develop.md)「水平扩展」）。
+
+---
+
+## 反馈
+
+有问题、Bug、或想说自己打算怎么用：到 [Discussions](https://github.com/easy30/easy-vue/discussions) 发帖；确定的缺陷与需求走 [Issues](https://github.com/easy30/easy-vue/issues)。
