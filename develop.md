@@ -116,6 +116,8 @@ SCRIPTC_CC=zigcc SCRIPTC_TARGET=aarch64-linux-musl node_modules/.bin/scriptc bui
 
 ## 四、deps 实现要点（src/deps.ts）
 
+> 定位：`deps` 是**构建期内部能力**，README 不对外展开（对使用者只需一句「组件库体积可砍 70%+」）；接入与集成方式以 README 为准。
+
 流水线：**读配置 → 扫描源码 → 生成 entry → esbuild --bundle → 原子写产物 + meta.json**。
 
 - **扫描**：递归 `scan.roots`（按扩展名过滤），两类名字取并集——① 模板标签 `<el-xxx>`（经 `componentPrefix` 前缀匹配，Pascal 化成组件名）；② `import { ElXxx } from '<name>'` 具名导入（支持多行与 `as`，取原始名）。再套 `ignore` 剔除。纯字符串 `split` 实现（scriptc 不支持带 `/g` 的 regex 匹配，见「六、踩坑」）。

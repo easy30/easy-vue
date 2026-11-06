@@ -1,5 +1,7 @@
 # easy-vue
 
+<sub>中文 · [English](README.en.md)</sub>
+
 <p>
   <a href="https://github.com/easy30/easy-vue/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/easy30/easy-vue?color=42b883"></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows%20x64%2Farm64-blue">
