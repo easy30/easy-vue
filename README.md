@@ -1,8 +1,25 @@
 # easy-vue
 
-**免 Node 的前端单文件编译器（原生二进制）。** 把 `.vue` / `.ts` / `@api` 源码编译成浏览器可直接运行的 ESM JS，不依赖 Node 运行时，任何后端语言（Java / Python / Go…）都能通过 HTTP 或 stdin/stdout 调用。各平台免编译安装包已发布在 GitHub Release（见下方「一、获取」）。
+<p>
+  <a href="https://github.com/easy30/easy-vue/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/easy30/easy-vue?color=42b883"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows%20x64%2Farm64-blue">
+  <img alt="Runtime" src="https://img.shields.io/badge/runtime-none%20(no%20Node)-success">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/easy30/easy-vue"></a>
+  <a href="https://github.com/easy30/easy-vue/discussions"><img alt="Discussions" src="https://img.shields.io/badge/discussions-welcome-8a2be2"></a>
+</p>
 
-> 开发 / 构建 / 踩坑排查等细节见 **[develop.md](./develop.md)**。
+**免 Node 的 Vue 3 单文件编译器（原生二进制）**：一个可执行文件（2~5 MB，随平台），把 `.vue` / `.ts` / `@api` 编译成浏览器直接跑的 ESM JS——没有 `node_modules`、没有打包器、没有构建步骤，Java / Python / Go 等任何后端都能通过 HTTP 或 stdin/stdout 调用它。各平台免编译安装包见下方「一、获取」。
+
+| 常见难题 | easy-vue 的做法 |
+|---|---|
+| 内网 / 离线环境装不了 Node 和 npm 依赖 | 解压即用的单个二进制，零运行时依赖；6 个平台免编译安装包 |
+| 只想给后端塞几个 Vue 页面，不想引入整条前端构建链 | 后端读到 `.vue` 就现场编译（常驻服务里约 4 ms，本机实测中位数），改完刷新即生效 |
+| 镜像 / 安装包太大 | 前端目录只剩源码：没有 `node_modules`，也没有 dist |
+| Java 项目想直接写 `.vue` | 用 [easy-vue4j](https://github.com/easy30/easy-vue4j)，Spring Boot 内直接跑 `.vue` |
+
+![easy-vue：起常驻服务，.vue 现场编译成浏览器可直接 import 的 ESM JS](docs/demo.gif)
+
+> 开发 / 构建 / 踩坑排查等细节见 **[develop.md](./develop.md)**；参与贡献见 **[CONTRIBUTING.md](./CONTRIBUTING.md)**。
 
 ---
 
