@@ -1,6 +1,6 @@
 # easy-vue
 
-**免 Node 的前端单文件编译器（原生二进制）。** 把 `.vue` / `.ts` / `@api` 源码编译成浏览器可直接运行的 ESM JS，不依赖 Node 运行时，任何后端语言（Java / Python / Go…）都能通过 HTTP 或 stdin/stdout 调用。另带 `deps` 子命令：构建期对组件库做依赖摇树，大幅削减 vendor 体积。
+**免 Node 的前端单文件编译器（原生二进制）。** 把 `.vue` / `.ts` / `@api` 源码编译成浏览器可直接运行的 ESM JS，不依赖 Node 运行时，任何后端语言（Java / Python / Go…）都能通过 HTTP 或 stdin/stdout 调用。各平台免编译安装包已发布在 GitHub Release（见下方「一、获取」）。
 
 > 开发 / 构建 / 踩坑排查等细节见 **[develop.md](./develop.md)**。
 
@@ -22,7 +22,34 @@ curl -s -XPOST 127.0.0.1:9000/compile \
 # → {"id":null,"ok":true,"js":"// compiled by @vue/compiler-sfc via easy-vue\n..."}
 ```
 
-没有 Node、没有 npm install——上面的编译发生在一个原生二进制里。各平台包见下方「一、获取」,接入 Java / Python 直接跳「六、集成到其他服务」。
+没有 Node、没有 npm install——上面的编译发生在一个原生二进制里。各平台包见下方「一、获取」；后端集成先看下一节「一分钟接入 Python」，其余语言见「六、集成到其他服务」。
+
+---
+
+## 一分钟接入 Python
+
+不需要 pip 装任何包：起一个 easy-vue 常驻子进程当编译器，把 `.vue` 源码 POST 给它，拿回浏览器可直接 `import` 的 ESM JS。
+
+```python
+import json, subprocess, urllib.request
+
+# ① 起常驻编译服务（作为你服务的子进程，随它启停）
+proc = subprocess.Popen(["./easy-vue", "serve", "127.0.0.1:9901"])
+
+def compile_vue(source: str, filename: str) -> str:
+    # ② .vue 源码 → 编译 → 自带样式的 ESM JS（样式缺省注入，无需单独伺服 .css）
+    data = json.dumps({"type": "vue", "source": source, "filename": filename}).encode()
+    with urllib.request.urlopen("http://127.0.0.1:9901/compile", data=data, timeout=10) as r:
+        return json.loads(r.read().decode())["js"]
+```
+
+浏览器侧照常 `import Home from '/views/home.vue'`：你的 Python 路由读到 `.vue` 文件后调 `compile_vue()`，以 `Content-Type: text/javascript` 返回即可（ESM 必须是 JS MIME）。
+
+完整可运行版见 [`demo/python-minimal/`](./demo/python-minimal/)（`index.html` 17 行 + `main.py` 111 行，标准库零依赖）：
+
+```bash
+cd demo/python-minimal && python3 main.py   # 浏览器打开 http://127.0.0.1:8800/
+```
 
 ---
 
@@ -57,8 +84,7 @@ curl -s -XPOST 127.0.0.1:9000/compile \
 |---|---|
 | `serve [host:]port` | **HTTP 常驻编译服务**（推荐，可并发、可设超时、可多次复用）。必须显式指定端口；缺省绑定 `127.0.0.1`（仅本机），远程访问用 `0.0.0.0:port` |
 | `convert` | **一次性编译**：stdin 读一行 JSON → 编译 → stdout 出一行 JSON → 退出 |
-| `deps -c <配置.json> [--force]` | **依赖摇树**：扫描源码 → esbuild 摇树 → 产物 js/css + meta.json（详见第五章） |
-| `--version` | 打印内置版本号后退出（如 `easy-vue v1.2.2`） |
+| `--version` | 打印内置版本号后退出（如 `easy-vue v1.3.0`） |
 
 ```bash
 # 本机 HTTP 常驻（端口 9000）
@@ -69,12 +95,9 @@ curl -s -XPOST 127.0.0.1:9000/compile \
 
 # 一次性（stdin → stdout）
 ./easy-vue convert
-
-# 依赖摇树
-./easy-vue deps -c easy-vue-deps.json
 ```
 
-**无状态**：编译不缓存（缓存策略由调用方决定）；`deps` 自带 listHash 产物缓存。
+**无状态**：编译不缓存（缓存策略由调用方决定）。
 
 ---
 
@@ -142,56 +165,16 @@ curl -s -XPOST 127.0.0.1:9000/compile -d '{"filename":"/no/such.vue"}'
 
 ---
 
-## 五、依赖摇树（deps）
+## 五、发布到 GitHub
 
-构建期把组件库按「实际用到的名字」摇树打包成 lite 产物，替换 importmap 里的全量包。典型收益：element-plus 全量 vendor JS 1.9MB → lite 417KB（gzip 438KB → 134KB），CSS 同步瘦身；扫描不到的名字（未使用的组件）不会进入产物。
+本项目通过**打 tag 自动发版**：`.github/workflows/release.yml` 在 GitHub 托管的 macOS runner 上用 zig 交叉编译 6 个平台（mac arm64/intel、linux x86_64/arm64、win x64/arm64），再把各平台 prebuilt `esbuild` 与二进制作成**同目录 zip**，上传到 GitHub Release——解压即用，无需任何配置。
 
-### 工作流程
+- **版本号唯一出处**是仓库根 `VERSION`（带 `v` 前缀，如 `v1.3.0`），`scripts/gen-version.sh` 把它注入二进制，`easy-vue --version` 可查
+- **发版**：改 `VERSION` → 提交 → `git tag v1.3.0 && git push origin v1.3.0`；进度看 Actions 页，产物看 Releases 页
+- tag 必须与 `VERSION` 一致（CI 不校验，靠发版人保证）；重建已存在的 tag 要先删远端 tag 再推
+- 只发布 6 个白名单 zip、不发布裸二进制，避免中间产物（如 `serve.c`）混进 Release
 
-扫描源码（模板标签 + 具名导入）→ 生成 entry → `esbuild --bundle --format=esm` 摇树 → 产物 js/css + `meta.json` 写入 `outputDir`（临时文件 + rename 原子替换）。
-
-- **结果契约**：stdout 输出一行 JSON `{"ok":true,"results":{...}}`（同 convert 风格），进度日志走 stderr；exit 0 成功 / 1 失败。任一 dep 失败即整体失败并停止（调用方可据此整体回退，避免半新半旧）。
-- **缓存**：`listHash = hash(排序名单 + dep 配置 + 包版本)`，与 `meta.json` 中记录一致且两份产物都存在 → 跳过 esbuild（扫描照常执行）。`--force` 强制重新生成。
-
-### 配置文件（v1）
-
-相对路径以**配置文件所在目录**为基准。
-
-```jsonc
-{
-  "version": 1,
-  "scan": {
-    "roots": ["src/main/resources/static"],   // 必填，递归扫描
-    "extensions": [".vue", ".html"]           // 缺省即此值
-  },
-  "outputDir": "target/classes/static/vendor/gen",  // 必填，产物与 meta.json 输出目录
-  "deps": [{
-    "name": "element-plus",                        // 裸导入名 = importmap key
-    "packageRoot": "node_modules/element-plus",    // npm 包解压根（构建机上存在）
-    "strategy": "deep",                            // deep=组件库深路径摇树；缺省 root=普通 ESM 库
-    "componentPrefix": "el-",                      // deep：模板标签前缀
-    "mappings": {                                  // deep：名字 → 包内目录（覆盖缺省推导）
-      "ElAside": "container", "ElHeader": "container", "ElMain": "container",
-      "ElDropdownItem": "dropdown", "ElFormItem": "form", "ElOption": "select"
-    },
-    "ignore": ["ElWatermark"],                     // 从扫描结果剔除的名字
-    "styleTemplate": "es/components/{dir}/style/css",  // deep：样式聚合模板；不配则不聚合 CSS
-    "output": { "js": "element-plus.lite.mjs", "css": "element-plus.lite.css" }  // 缺省 <name>.lite.*
-  }],
-  "esbuild": {
-    "target": "es2020",          // 缺省 es2020
-    "minify": true,              // 缺省 true
-    "external": ["vue"]          // 缺省 []；外部依赖不打进产物（vue 应 external）
-  }
-}
-```
-
-### 字段说明
-
-- **deep 策略（组件库）**：按「每个名字一个深路径模块」导入才能精确摇树——组件库根入口的顶层副作用会让 esbuild 保守地保留全部组件（与 Vite 依赖预构建同原理）。名字来自 `<el-xxx>` 标签与 `import { ElXxx } from '<name>'` 并集；目录缺省推导 = 剥掉 `El` 前缀后 kebab 化（`ElTableColumn` → `table-column`），与实际目录不符的（如 `ElAside` 实际在 `container` 目录）用 `mappings` 补，确认不用的用 `ignore` 剔除；缺 mappings 会报错并列出缺失名单，不会静默漏摇。
-- **root 策略（普通 ESM 库）**：从包根入口（`package.json` 的 module > main > index.mjs > index.js）导入扫描到的具名导入即可摇树，适合 sideEffects 声明规范的库（如 lodash-es）。
-- **产物**：`default` 导出 install 插件（只注册模板标签里出现的组件），具名导出覆盖全部扫描名单，可直接 `app.use(lite)` + `import { ElMessage } from '<lite>'`；`meta.json` 记录每个 dep 的版本、listHash、名单与产物 hash，供集成方做 ETag / 回退判断。
-- **vue 保持 external**：产物运行时仍从 importmap 取 `vue`，与宿主共享同一实例。
+详细步骤与踩坑记录见 **[RELEASE.md](./RELEASE.md)**。
 
 ---
 
@@ -203,4 +186,3 @@ curl -s -XPOST 127.0.0.1:9000/compile -d '{"filename":"/no/such.vue"}'
   - [`demo/python/`](./demo/python/) — **完整一体化演示**：FastAPI + Uvicorn，复刻 vue4j 的请求过滤语义（mock API / 路由排除 / 编译缓存 / SPA 兜底），`./setup.sh` + `uvicorn main:app` 即跑。
 - **Go**：同样一个现成 demo：[`demo/go-minimal/`](./demo/go-minimal/) — **最简演示**：仅 3 个文件，标准库 `net/http` 零第三方依赖（连 `go.mod` 都不需要），`go run main.go` 后浏览器打开 http://127.0.0.1:8800/ 即跑；easy-vue 作为子进程随它启动、随它退出。
 - **任意后端**：把「启动一个 `serve` 进程 + `POST /compile`」这套协议集成进自己服务即可；多进程水平扩展 = 多开几个 `serve` 端口 + 自己调度（客户端自选端口的具体做法见 [develop.md](./develop.md)「水平扩展」）。
-- **依赖摇树产物**：`deps` 输出到磁盘（`outputDir`），构建期调用（如 Maven/Gradle 插件、CI 脚本），运行时按 importmap 映射或网关替换加载 lite 文件即可；`meta.json` 里的 hash 可直接用作 ETag。
