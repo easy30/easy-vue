@@ -67,6 +67,8 @@ cd demo/python-minimal && python3 main.py   # open http://127.0.0.1:8800/
 
 Grab the zip for your platform from [Releases](https://github.com/easy30/easy-vue/releases/latest):
 
+> Mainland China? Use the [Gitee mirror](https://gitee.com/easy30/easy-vue) — same code, faster access.
+
 | zip | platform |
 |---|---|
 | `easy-vue-mac-arm64.zip` | macOS Apple Silicon |

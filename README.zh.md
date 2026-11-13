@@ -76,6 +76,8 @@ cd demo/python-minimal && python3 main.py   # 浏览器打开 http://127.0.0.1:8
 
 ### 方式 A：GitHub Release（推荐，免编译）
 
+> 国内访问慢可用 Gitee 镜像：https://gitee.com/easy30/easy-vue （代码一致，含 README、示例与标签）
+
 从 https://github.com/easy30/easy-vue/releases 下载**对应你平台**的 zip 包：
 
 | zip | 平台 |
